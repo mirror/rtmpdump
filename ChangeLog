@@ -1,0 +1,69 @@
+RTMPDump
+Copyright 2008-2009 Andrej Stepanchuk; Distributed under the GPL v2
+
+04 Feb 2009, v1.3d
+
+- fixed missing terminating character in url parsing
+
+19 Jan 2009, v1.3b
+
+- fixed segfault on Mac OS/BSDdue to times(0)
+
+- Makefile rewritten
+
+16 Jan 2009, v1.3a
+
+- fixed a bug introduced in v1.3 (wrong report bytes count), downloads won't
+hang anymore
+
+10 Jan 2009, v1.3
+
+- fixed audio only streams (rtmpdump now recognizes the stream and writes a
+correct tag, audio, video, audio+video)
+
+- improved resume function to wait till a the seek is executed by the server.
+The server might send playback data before seeking, so we ignore up to e.g. 50
+frames and keep waiting for a keyframe with a timestamp of zero.
+
+- nevertheless resuming does not always work since the server sometimes
+doesn't resend the keyframe, seeking in flash is unreliable
+
+02 Jan 2009, v1.2a
+
+- fixed non-standard rtmp urls (including characters + < > ; )
+
+- added small script get_hulu which can download hulu.com streams (US only)
+(many thanks to Richard Ablewhite for the help with hulu.com)
+
+01 Jan 2009, v1.2:
+
+- fixed FLV streams (support for resuming extended)
+
+- fixed hanging download at the end
+
+- several minor bugfixes
+
+- changed parameter behaviour: not supplied parameters are omitted from the
+connect packet, --auth is introduced (was automatically obtained from url
+before, but it is possible to have an auth in the tcurl/rtmp url only without
+an additional encoded string in the connect packet)
+
+28 Dec 2008, v1.1a:
+
+- fixed warnings, added -Wall to Makefile
+
+28 Dec 2008, v1.1:
+
+- fixed stucking downloads (the buffer time is set to the duration now,
+  so the server doesn't wait till the buffer is emptied
+
+ - added a --resume option to coninue incomplete downloads
+
+- added support for AMF_DATE (experimental, no stream to test so far)
+
+- fixed AMF parsing and several small bugs (works on 64bit platforms now)
+
+24 Dec 2008, v1.0:
+
+- First release
+

@@ -22,30 +22,42 @@
  *
  */
 
-#include <string>
-#include <vector>
+//#include <string>
+//#include <vector>
 
-#include <sys/types.h>
-#include <sys/socket.h>
+#ifdef WIN32
+#else
+//#include <sys/types.h>
+//#include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-#include <unistd.h>
-#include <netinet/in.h>
+//#include <unistd.h>
+//#include <netinet/in.h>
+#endif
 
 #include "AMFObject.h"
 #include "rtmppacket.h"
+
+#define RTMP_PROTOCOL_UNDEFINED	-1
+#define RTMP_PROTOCOL_RTMP      0
+#define RTMP_PROTOCOL_RTMPT     1 // not yet supported
+#define RTMP_PROTOCOL_RTMPS     2 // not yet supported
+#define RTMP_PROTOCOL_RTMPE     3 // not yet supported
+#define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
+#define RTMP_PROTOCOL_RTMFP     5 // not yet supported
 
 namespace RTMP_LIB
 {
 
 typedef struct
 {
-        char hostname[256];
+        char *hostname;
         unsigned int port;
+	int protocol;
+	char *playpath;
 
-        char *url;
         char *tcUrl;
-        char *player;
+        char *swfUrl;
         char *pageUrl;
         char *app;
         char *auth;
@@ -61,13 +73,22 @@ class CRTMP
       CRTMP();
       virtual ~CRTMP();
 
-      //void SetPlayer(const std::string &strPlayer);
-      //void SetPageUrl(const std::string &strPageUrl);
-      //void SetPlayPath(const std::string &strPlayPath);
       void SetBufferMS(int size);
       void UpdateBufferMS();
 
-      bool Connect(char *url, char *tcUrl, char *player, char *pageUrl, char *app, char *auth, char *flashVer, double dTime);
+      bool Connect(
+      	int protocol, 
+	char *hostname, 
+	unsigned int port, 
+	char *playpath, 
+	char *tcUrl, 
+	char *swfUrl, 
+	char *pageUrl, 
+	char *app, 
+	char *auth, 
+	char *flashVer, 
+      	double dTime);
+
       bool IsConnected(); 
       double GetDuration();
 
@@ -100,6 +121,7 @@ class CRTMP
       bool SendCheckBW();
       bool SendCheckBWResult();
       bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
+      bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
       bool SendPlay();
       bool SendPause();
@@ -132,6 +154,7 @@ class CRTMP
       int  m_nBytesInSent;
       bool m_bPlaying;
       int  m_nBufferMS;
+      int  m_stream_id; // returned in _result from invoking createStream
 
       //std::string m_strPlayer;
       //std::string m_strPageUrl;
@@ -141,8 +164,9 @@ class CRTMP
       std::vector<std::string> m_methodCalls; //remote method calls queue
 
       LNK Link;
-      char *m_pBuffer;
-      int  m_nBufferSize;
+      char *m_pBuffer;      // data read from socket
+      char *m_pBufferStart; // pointer into m_pBuffer of next byte to process
+      int  m_nBufferSize;   // number of unprocessed bytes in buffer
       RTMPPacket m_vecChannelsIn[64];
       RTMPPacket m_vecChannelsOut[64];
 

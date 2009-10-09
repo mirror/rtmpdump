@@ -21,14 +21,19 @@
  */
 
 #include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
-#include <arpa/inet.h>
+//#include <stdlib.h>
+//#include <stdio.h>
+//#include <time.h>
+//#include <arpa/inet.h>
+
+#ifdef WIN32
+#include <winsock.h> // for htons
+#endif
 
 #include "AMFObject.h"
 #include "log.h"
 #include "rtmp.h"
+#include "bytes.h"
 
 RTMP_LIB::AMFObjectProperty RTMP_LIB::AMFObject::m_invalidProp;
 
@@ -201,7 +206,7 @@ int RTMP_LIB::AMFObjectProperty::Decode(const char * pBuffer, int nSize, bool bD
     case 0x00: //AMF_NUMBER:
       if (nSize < (int)sizeof(double))
         return -1;
-      m_dNumVal = RTMP_LIB::CRTMP::ReadNumber(pBuffer+1);
+      m_dNumVal = ReadNumber(pBuffer+1);
       nSize -= sizeof(double);
       m_type = AMF_NUMBER;
       break;
@@ -266,7 +271,7 @@ int RTMP_LIB::AMFObjectProperty::Decode(const char * pBuffer, int nSize, bool bD
       if (nSize < 10)
               return -1;
 
-      m_dNumVal = RTMP_LIB::CRTMP::ReadNumber(pBuffer+1);
+      m_dNumVal = ReadNumber(pBuffer+1);
       m_nUTCOffset = RTMP_LIB::CRTMP::ReadInt16(pBuffer+9);
 
       m_type = AMF_DATE;

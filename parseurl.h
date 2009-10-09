@@ -1,5 +1,7 @@
-/*  RTMP Dump
- *  Copyright (C) 2008-2009 Andrej Stepanchuk
+#ifndef _PARSEURL_H_
+#define _PARSEURL_H_
+/*  RTMPDump
+ *  Copyright (C) 2009 Andrej Stepanchuk
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,20 +20,7 @@
  *
  */
 
-#ifndef __LOG_H__
-#define __LOG_H__
-
-#define _DEBUG
-
-#ifdef _DEBUG
-#undef NODEBUG
-#endif
-
-#define LOGDEBUG        0
-#define LOGERROR        1
-#define LOGWARNING	2
-
-void Log(int level, const char *format, ...);
+bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
 
 #endif
 

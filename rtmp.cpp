@@ -20,23 +20,28 @@
  *
  */
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
+
+#include <assert.h>
+
+#ifdef WIN32
+#include <winsock.h>
+#define close(x)	closesocket(x)
+#else
 #include <sys/times.h>
-#include <time.h>
 #include <errno.h>
-#include <boost/regex.hpp>
+#endif
 
 #include "rtmp.h"
 #include "AMFObject.h"
 #include "log.h"
+#include "bytes.h"
 
 #define RTMP_SIG_SIZE 1536
 #define RTMP_LARGE_HEADER_SIZE 12
 
-#define RTMP_BUFFER_CACHE_SIZE (16*1024)
+#define RTMP_BUFFER_CACHE_SIZE (16*1024) // needs to fit largest number of bytes recv() may return
 
 using namespace RTMP_LIB;
 using namespace std;
@@ -47,11 +52,35 @@ static const int packetSize[] = { 12, 8, 4, 1 };
 #define RTMP_PACKET_SIZE_SMALL    2
 #define RTMP_PACKET_SIZE_MINIMUM  3
 
-clock_t GetTime()
+inline int GetSockError() {
+#ifdef WIN32
+	return WSAGetLastError();
+#else
+	return errno;
+#endif
+}
+
+int32_t GetTime()
 {
+#ifdef _DEBUG
+	return 0;
+#elif defined(WIN32)
+	return timeGetTime();
+#else
 	struct tms t;
 	return times(&t);
+#endif
 }
+
+char RTMPProtocolStrings[][7] =
+{
+	"RTMP",
+	"RTMPT",
+	"RTMPS",
+	"RTMPE",
+	"RTMPTE",
+	"RTMFP"
+};
 
 CRTMP::CRTMP() : m_socket(0)
 {
@@ -74,86 +103,53 @@ void CRTMP::SetBufferMS(int size)
 {
   m_nBufferMS = size;
 }
-//*
+
 void CRTMP::UpdateBufferMS()
 {
   SendPing(3, 1, m_nBufferMS);
 }
-//*/
-bool CRTMP::Connect(char *url, char *tcUrl, char *player, char *pageUrl, char *app, char *auth, char *flashVer, double dTime)
+
+bool CRTMP::Connect(int protocol, char *hostname, unsigned int port, char *playpath, char *tcUrl, char *swfUrl, char *pageUrl, char *app, char *auth, char *flashVer, double dTime)
 {
-  // check url formatting
-  boost::regex re("^rtmp:\\/\\/[a-zA-Z0-9_\\.\\-]+((:(\\d)+\\/)|\\/)(([0-9a-zA-Z_:;\\+\\-\\.\\!\\\"\\$\\%\\&\\/\\(\\)\\=\\?\\<\\>\\s]*)$|$)");
+  assert(protocol < 6);
 
-  if (!boost::regex_match(url, re))
-  {
-  	Log(LOGERROR, "RTMP Connect: invalid url!");
-	return false;
-  }
+  Log(LOGDEBUG, "Protocol: %s", RTMPProtocolStrings[protocol]);
+  Log(LOGDEBUG, "Hostname: %s", hostname);
+  Log(LOGDEBUG, "Port    : %d", port);
+  Log(LOGDEBUG, "Playpath: %s", playpath);
 
-  Link.url = url;
+  if(tcUrl)
+  	Log(LOGDEBUG, "tcUrl   : %s", tcUrl);
+  if(swfUrl)
+  	Log(LOGDEBUG, "swfUrl  : %s", swfUrl);
+  if(pageUrl)
+  	Log(LOGDEBUG, "pageUrl : %s", pageUrl);
+  if(app)
+  	Log(LOGDEBUG, "app     : %s", app);
+  if(auth)
+  	Log(LOGDEBUG, "auth    : %s", auth);
+  if(flashVer)
+  	Log(LOGDEBUG, "flashVer: %s", flashVer);
+  if(dTime > 0)
+  	Log(LOGDEBUG, "SeekTime: %lf", dTime);
+
   Link.tcUrl = tcUrl;
-  Link.player = player;
+  Link.swfUrl = swfUrl;
   Link.pageUrl = pageUrl;
   Link.app = app;
   Link.auth = auth;
   Link.flashVer = flashVer;
   Link.seekTime = dTime;
 
-  boost::cmatch matches;
-
-  boost::regex re1("^rtmp:\\/\\/([a-zA-Z0-9_\\.\\-]+)((:([0-9]+)\\/)|\\/)[0-9a-zA-Z_:;\\+\\-\\.\\!\\\"\\$\\%\\&\\/\\(\\)\\=\\?\\<\\>\\s]+");
-  if(!boost::regex_match(url, matches, re1))
-  {
-  	Log(LOGERROR, "RTMP Connect: Regex for url doesn't match (error in programme)!");
-	return false;
-  }
-  /*for(int i=0; i<matches.size(); i++) {
-  	Log(LOGDEBUG, "matches[%d]: %s, %s", i, matches[i].first, matches[i].second);
-  }*/
-
-  if(matches[1].second-matches[1].first > 255) {
-  	Log(LOGERROR, "Hostname must not be longer than 255 characters!");
-	return false;
-  }
-  strncpy(Link.hostname, matches[1].first, matches[1].second-matches[1].first);
-  Link.hostname[matches[1].second-matches[1].first]=0x00;
-
-  Log(LOGDEBUG, "Hostname: %s", Link.hostname);
-
-  char portstr[6];
-  if(matches[4].second-matches[4].first > 5) {
-          Log(LOGERROR, "Port must not be longer than 5 digits!");
-	  return false;
-  }
-  strncpy(portstr, matches[4].first, matches[4].second-matches[4].first);
-  portstr[matches[4].second-matches[4].first]=0x00;
-
-  Link.port = atoi(portstr);
+  Link.protocol = protocol;
+  Link.hostname = hostname;
+  Link.port = port;
+  Link.playpath = playpath;
 
   if (Link.port == 0)
     Link.port = 1935;
   
-  Log(LOGDEBUG, "Port: %d", Link.port);
-
-  // obtain auth string if available
-  /*
-  boost::regex re2("^.*auth\\=([0-9a-zA-Z_:;\\-\\.\\!\\\"\\$\\%\\/\\(\\)\\=\\s]+)((&.+$)|$)");
-  boost::cmatch matches2;
-  
-  if(boost::regex_match(url, matches2, re2)) {
-    int len = matches2[1].second-matches2[1].first;
-    if(len > 255) {
-    	Log(LOGERROR, "Auth string must not be longer than 255 characters!");
-    }
-    Link.auth = (char *)malloc((len+1)*sizeof(char));
-    strncpy(Link.auth, matches2[1].first, len);
-    Link.auth[len]=0;
-
-    Log(LOGDEBUG, "Auth: %s", Link.auth);
-  } else { Link.auth = 0; }
-  //*/
-
+  // close any previous connection
   Close();
 
   sockaddr_in service;
@@ -173,11 +169,11 @@ bool CRTMP::Connect(char *url, char *tcUrl, char *player, char *pageUrl, char *a
 
   service.sin_port = htons(Link.port);
   m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (m_socket != 0 )
+  if (m_socket != -1)
   {
     if (connect(m_socket, (sockaddr*) &service, sizeof(struct sockaddr)) < 0)
     {
-      Log(LOGERROR, "%s, failed to connect.", __FUNCTION__);
+      Log(LOGERROR, "%s, failed to connect socket. Error: %d", __FUNCTION__, GetSockError());
       Close();
       return false;
     }
@@ -193,22 +189,21 @@ bool CRTMP::Connect(char *url, char *tcUrl, char *player, char *pageUrl, char *a
     Log(LOGDEBUG, "handshaked");
     if (!Connect())
     {
-      Log(LOGERROR, "%s, connect failed.", __FUNCTION__);
+      Log(LOGERROR, "%s, RTMP connect failed.", __FUNCTION__);
       Close();
       return false;
     }
     // set timeout
-      struct timeval tv;
-      memset(&tv, 0, sizeof(tv));
-      tv.tv_sec = 300;
-      if (setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,  sizeof(tv)))
-      {
-      	Log(LOGERROR,"Setting timeout failed!");
-      }
+    struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = 300;
+    if (setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,  sizeof(tv))) {
+      	Log(LOGERROR,"%s, Setting socket timeout to %ds failed!", __FUNCTION__, tv.tv_sec);
+    }
   }
   else
   {
-    Log(LOGERROR, "%s, failed to create socket.", __FUNCTION__);
+    Log(LOGERROR, "%s, failed to create socket. Error: %d", __FUNCTION__, GetSockError());
     return false;
   }
 
@@ -223,8 +218,7 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
     if (!packet.IsReady())
     {
       packet.FreePacket();
-      usleep(5000); // 5ms
-      //sleep(0.1);//30);
+      //usleep(5000); // 5ms
       continue;
     }
 
@@ -271,14 +265,14 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 
       case 0x12:
         // metadata (notify)
-        Log(LOGDEBUG, "%s, received: notify", __FUNCTION__);
+        Log(LOGDEBUG, "%s, received: notify %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleMetadata(packet.m_body, packet.m_nBodySize);
         bHasMediaPacket = true;
         break;
 
       case 0x14:
         // invoke
-	Log(LOGDEBUG, "%s, received: invoke", __FUNCTION__);
+	Log(LOGDEBUG, "%s, received: invoke %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleInvoke(packet);
         break;
 
@@ -293,7 +287,7 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
         break;
 
       default:
-        Log(LOGDEBUG, "unknown packet type received: 0x%02x", packet.m_packetType);
+        Log(LOGDEBUG, "i%s, unknown packet type received: 0x%02x", __FUNCTION__, packet.m_packetType);
     }
 
     if (!bHasMediaPacket) { 
@@ -310,31 +304,30 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 int CRTMP::ReadN(char *buffer, int n)
 {
   int nOriginalSize = n;
+  
+  #ifdef _DEBUG
   memset(buffer, 0, n);
+  #endif
+
   char *ptr = buffer;
   while (n > 0)
   {
     int nBytes = 0;
-    // for dumping we don't need buffering, so we won't get stuck in the end!
-    /*if (m_bPlaying)
-    {
-      if (m_nBufferSize < n)
-        FillBuffer();
-
-      int nRead = ((n<m_nBufferSize)?n:m_nBufferSize);
-      if (nRead > 0)
-      {
-        memcpy(buffer, m_pBuffer, nRead);
-        memmove(m_pBuffer, m_pBuffer + nRead, m_nBufferSize - nRead); // crunch buffer
-        m_nBufferSize -= nRead;
-        nBytes = nRead;
-        m_nBytesIn += nRead;
-        if (m_nBytesIn > m_nBytesInSent + (600*1024) ) // report every 600K
-          SendBytesReceived();
-      }
-    }
-    else*/
-      nBytes = recv(m_socket, ptr, n, 0);
+// todo, test this code:
+/*
+    if(m_nBufferSize == 0)
+    	FillBuffer();
+    int nRead = ((n<m_nBufferSize)?n:m_nBufferSize;
+    if(nRead > 0) {
+    	memcpy(ptr, m_pBufferStart, nRead);
+	m_pBufferStart += nRead;
+	m_nBufferSize -= nRead;
+	nBytes = nRead;
+	m_nBytesIn += nRead;
+	if(m_nBytesIn > m_nBytesInSent + (600*1024)) // report every 600K
+		SendBytesReceived();
+    }//*/
+    nBytes = recv(m_socket, ptr, n, 0);
 
     if(m_bPlaying) {
         m_nBytesIn += nBytes;
@@ -344,7 +337,7 @@ int CRTMP::ReadN(char *buffer, int n)
  
     if (nBytes == -1)
     {
-      Log(LOGERROR, "%s, RTMP recv error %d", __FUNCTION__, errno);
+      Log(LOGERROR, "%s, RTMP recv error %d", __FUNCTION__, GetSockError());
       Close();
       return false;
     }
@@ -363,15 +356,22 @@ int CRTMP::ReadN(char *buffer, int n)
   return nOriginalSize - n;
 }
 
+#ifdef _DEBUG
+extern FILE *netstackdump;
+#endif
+
 bool CRTMP::WriteN(const char *buffer, int n)
 {
   const char *ptr = buffer;
   while (n > 0)
   {
+#ifdef _DEBUG
+	fwrite(ptr, 1, n, netstackdump);
+#endif
     int nBytes = send(m_socket, ptr, n, 0);
     if (nBytes < 0)
     {
-      Log(LOGERROR, "%s, RTMP send error %d (%d bytes)", __FUNCTION__, errno, n);
+      Log(LOGERROR, "%s, RTMP send error %d (%d bytes)", __FUNCTION__, GetSockError(), n);
       Close();
       return false;
     }
@@ -415,8 +415,8 @@ bool CRTMP::SendConnectPacket()
   	enc += EncodeString(enc, "app", Link.app);
   if(Link.flashVer)
   	enc += EncodeString(enc, "flashVer", Link.flashVer);
-  if(Link.player)
- 	enc += EncodeString(enc, "swfUrl", Link.player);
+  if(Link.swfUrl)
+ 	enc += EncodeString(enc, "swfUrl", Link.swfUrl);
   if(Link.tcUrl)
   	enc += EncodeString(enc, "tcUrl", Link.tcUrl);
   
@@ -439,6 +439,27 @@ bool CRTMP::SendConnectPacket()
 
   	enc += EncodeString(enc, Link.auth);
   }
+  packet.m_nBodySize = enc-packet.m_body;
+
+  return SendRTMP(packet);
+}
+
+bool CRTMP::SendBGHasStream(double dId, char *playpath)
+{
+  RTMPPacket packet;
+  packet.m_nChannel = 0x03;   // control channel (invoke)
+  packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+  packet.m_packetType = 0x14; // INVOKE
+
+  packet.AllocPacket(256); // should be enough
+  char *enc = packet.m_body;
+  enc += EncodeString(enc, "bgHasStream");
+  enc += EncodeNumber(enc, dId);
+  *enc = 0x05; // NULL
+  enc++;
+
+  enc += EncodeString(enc, playpath);
+
   packet.m_nBodySize = enc-packet.m_body;
 
   return SendRTMP(packet);
@@ -566,7 +587,7 @@ bool CRTMP::SendCheckBWResult()
   packet.AllocPacket(256); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "_result");
-  enc += EncodeNumber(enc, (double)time(NULL)); // temp
+  enc += EncodeNumber(enc, (double)GetTime()); // temp
   *enc = 0x05; // NULL
   enc++;
   enc += EncodeNumber(enc, (double)m_nBWCheckCounter++); 
@@ -582,7 +603,7 @@ bool CRTMP::SendPlay()
   packet.m_nChannel = 0x08;   // we make 8 our stream channel
   packet.m_headerType = RTMP_PACKET_SIZE_LARGE;
   packet.m_packetType = 0x14; // INVOKE
-  packet.m_nInfoField2 = 0x01000000;
+  packet.m_nInfoField2 = m_stream_id; //0x01000000;
 
   packet.AllocPacket(256); // should be enough
   char *enc = packet.m_body;
@@ -590,33 +611,30 @@ bool CRTMP::SendPlay()
   enc += EncodeNumber(enc, 0.0);
   *enc = 0x05; // NULL
   enc++;
-  // use m_strPlayPath
-  std::string strPlay;// = m_strPlayPath;
-  //if (strPlay.empty())
-  //{
-    // or use slist parameter, if there is one
-    std::string url = std::string(Link.url);
-    int nPos = url.find("slist=");
-    if (nPos > 0)
-      strPlay = url.substr(nPos+6, url.size()-(nPos+6)); //Mid(nPos + 6);
-		
-		if (strPlay.empty())
-		{
-			// or use last piece of URL, if there's more than one level
-			std::string::size_type pos_slash = url.find_last_of("/");
-			if ( pos_slash != std::string::npos )
-				strPlay = url.substr(pos_slash+1, url.size()-(pos_slash+1)); //Mid(pos_slash+1);
-		}
 
-		if (strPlay.empty()){
-			Log(LOGERROR, "%s, no name to play!", __FUNCTION__);
-			return false;
-		}
-  //}
+  Log(LOGDEBUG, "%s, sending play: %s", __FUNCTION__, Link.playpath);
+  enc += EncodeString(enc, Link.playpath);
+ /* 
+  *enc = 0x00; enc++;
+  *enc = 0xc0; enc++;
+  *enc = 0x8f; enc++;
+  *enc = 0x40; enc++;
+  *enc = 0x00; enc++;
+  *enc = 0x00; enc++;
+  *enc = 0x00; enc++;
+  *enc = 0x00; enc++;
+  *enc = 0x00; enc++;
 
-  Log(LOGDEBUG, "Sending play: %s", strPlay.c_str());
-  enc += EncodeString(enc, strPlay.c_str());
-  enc += EncodeNumber(enc, 0.0);
+  double d= ReadNumber(enc-8);
+  
+  Log(LOGERROR, "dd: %lf", d);
+  exit(1);
+  // */
+  enc += EncodeNumber(enc, 0.0); // tincan
+  //////enc += EncodeNumber(enc, -1.0); // seems to work for all so far
+  //enc += EncodeNumber(enc, -1000.0); // k-tv.at
+  
+  //enc += EncodeNumber(enc, 4.0); // well is this the duration, lets see
 
   packet.m_nBodySize = enc - packet.m_body;
 
@@ -682,10 +700,13 @@ void CRTMP::HandleInvoke(const RTMPPacket &packet)
     {
       SendServerBW();
       SendPing(3, 0, 300);
+
       SendCreateStream(2.0);
     }
     else if (methodInvoked == "createStream")
     {
+      m_stream_id = (int)obj.GetProperty(3).GetNumber();
+
       SendPlay();
       if(Link.seekTime > 0) {
       	Log(LOGDEBUG, "%s, sending seek: %f ms", __FUNCTION__, Link.seekTime);
@@ -725,6 +746,8 @@ void CRTMP::HandleInvoke(const RTMPPacket &packet)
     ||  code == "NetStream.Play.Failed"
     ||  code == "NetStream.Play.Stop")
       Close();
+
+    //if (code == "NetStream.Play.Complete")
 
     /*if(Link.seekTime > 0) {
     	if(code == "NetStream.Seek.Notify") { // seeked successfully, can play now!
@@ -822,13 +845,13 @@ void CRTMP::HandleVideo(const RTMPPacket &packet)
 void CRTMP::HandlePing(const RTMPPacket &packet)
 {
   short nType = -1;
-  if (packet.m_body && packet.m_nBodySize >= sizeof(short))
+  if (packet.m_body && packet.m_nBodySize >= 2)
     nType = ReadInt16(packet.m_body);
-  Log(LOGDEBUG, "server sent ping. type: %d", nType);
+  Log(LOGDEBUG, "%s, received ping. type: %d", __FUNCTION__, nType);
 
   if (nType == 0x06 && packet.m_nBodySize >= 6) // server ping. reply with pong.
   {
-    unsigned int nTime = ReadInt32(packet.m_body + sizeof(short));
+    unsigned int nTime = ReadInt32(packet.m_body + 2);
     SendPing(0x07, nTime);
   }
 }
@@ -875,7 +898,7 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
     packet.m_packetType = header[6];
 
   if (nSize == 11)
-    packet.m_nInfoField2 = ReadInt32(header+7);
+    packet.m_nInfoField2 = ReadInt32LE(header+7);
 
   if (packet.m_nBodySize > 0 && packet.m_body == NULL && !packet.AllocPacket(packet.m_nBodySize))
   {
@@ -929,6 +952,7 @@ int  CRTMP::ReadInt24(const char *data)
   return ntohl(val);
 }
 
+// big-endian 32bit integer
 int  CRTMP::ReadInt32(const char *data)
 {
   int val;
@@ -954,19 +978,6 @@ std::string CRTMP::ReadString(const char *data)
 bool CRTMP::ReadBool(const char *data)
 {
   return *data == 0x01;
-}
-
-double CRTMP::ReadNumber(const char *data)
-{
-  double val;
-  char *dPtr = (char *)&val;
-  for (int i=7;i>=0;i--)
-  {
-    *dPtr = data[i];
-    dPtr++;
-  }
-
-  return val;
 }
 
 int CRTMP::EncodeString(char *output, const std::string &strName, const std::string &strValue)
@@ -999,6 +1010,7 @@ int CRTMP::EncodeInt24(char *output, int nVal)
   return 3;
 }
 
+// big-endian 32bit integer
 int CRTMP::EncodeInt32(char *output, int nVal)
 {
   nVal = htonl(nVal);
@@ -1058,13 +1070,7 @@ int CRTMP::EncodeNumber(char *output, double dVal)
   *buf = 0x00; // type: Number
   buf++;
 
-  char *dPtr = (char *)&dVal;
-  for (int i=7;i>=0;i--)
-  {
-    buf[i] = *dPtr;
-    dPtr++;
-  }
-
+  WriteNumber(buf, dVal);
   buf += 8;
 
   return buf - output;
@@ -1085,29 +1091,70 @@ int CRTMP::EncodeBoolean(char *output, bool bVal)
 
 bool CRTMP::HandShake()
 {
+  bool encrypted = 0;//Link.protocol == RTMP_PROTOCOL_RTMPE || Link.protocol == RTMP_PROTOCOL_RTMPTE;
+
   char clientsig[RTMP_SIG_SIZE+1];
   char serversig[RTMP_SIG_SIZE];
 
-  //Log(LOGDEBUG, "HandShake: ");
-  clientsig[0] = 0x3;
+  if(encrypted)
+  	clientsig[0] = 0x06;
+  else
+  	clientsig[0] = 0x03;
+  
   uint32_t uptime = htonl(GetTime());
   memcpy(clientsig + 1, &uptime, 4);
-  memset(clientsig + 5, 0, 4);
 
-  for (int i=9; i<=RTMP_SIG_SIZE; i++)
-    clientsig[i] = (char)(rand() % 256);
+  /* TODO RTMPE ;), its just RC4 with diffie-hellman
+  // set version to 9.0.124.0
+  clientsig[5] = 0x09;
+  clientsig[6] = 0x00;
+  clientsig[7] = 0x7C;
+  clientsig[8] = 0x00;
+  */
+  memset(&clientsig[5], 0, 4);
+
+#ifdef _DEBUG
+    for (int i=9; i<=RTMP_SIG_SIZE; i++) 
+      clientsig[i] = 0xff;
+#else
+    for (int i=9; i<=RTMP_SIG_SIZE; i++)
+      clientsig[i] = (char)(rand() % 256);
+#endif
 
   if (!WriteN(clientsig, RTMP_SIG_SIZE + 1))
     return false;
 
-  char dummy;
-  if (ReadN(&dummy, 1) != 1) // 0x03
+  char type;
+  if (ReadN(&type, 1) != 1) // 0x03 or 0x06
     return false;
 
+  Log(LOGDEBUG, "%s: Type Answer   : %02X", __FUNCTION__, type);
   
+  if(type != clientsig[0])
+  	Log(LOGWARNING, "%s: Type mismatch: client sent %d, server answered %d", __FUNCTION__, clientsig[0], type);
+
   if (ReadN(serversig, RTMP_SIG_SIZE) != RTMP_SIG_SIZE)
     return false;
 
+  // decode server response
+  uint32_t suptime;
+
+  memcpy(&suptime, serversig, 4);
+  suptime = ntohl(suptime);
+
+  Log(LOGDEBUG, "%s: Server Uptime : %d", __FUNCTION__, suptime);
+  Log(LOGDEBUG, "%s: FMS Version   : %d.%d.%d.%d", __FUNCTION__, serversig[4], serversig[5], serversig[6], serversig[7]);
+
+  /*printf("Server signature:\n");
+  for(int i=0; i<RTMP_SIG_SIZE; i++) {
+  	printf("%02X ", serversig[i]);
+  }
+  printf("\n");*/
+
+  // do Diffie-Hellmann Key exchange for encrypted RTMP
+  // ....
+
+  // 2nd part of handshake
   char resp[RTMP_SIG_SIZE];
   if (ReadN(resp, RTMP_SIG_SIZE) != RTMP_SIG_SIZE)
     return false;
@@ -1157,11 +1204,11 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
   }
 
   if (nSize > 8)
-    EncodeInt32(header+8, packet.m_nInfoField2);
+    EncodeInt32LE(header+8, packet.m_nInfoField2);
 
   if (!WriteN(header, nSize))
   {
-    Log(LOGWARNING, "couldnt send rtmp header");
+    Log(LOGWARNING, "couldn't send rtmp header");
     return false;
   }
 
@@ -1221,18 +1268,18 @@ void CRTMP::Close()
 
 bool CRTMP::FillBuffer()
 {
-  time_t now = time(NULL);
-  while (m_nBufferSize < RTMP_BUFFER_CACHE_SIZE && time(NULL) - now < 4)
-  {
-    int nBytes = recv(m_socket, m_pBuffer + m_nBufferSize, RTMP_BUFFER_CACHE_SIZE - m_nBufferSize, 0);
-    if (nBytes != -1)
-      m_nBufferSize += nBytes;
+    assert(m_nBufferSize == 0); // only fill buffer when it's empty
+    int nBytes = recv(m_socket, m_pBuffer, RTMP_BUFFER_CACHE_SIZE, 0);
+    if(nBytes != -1) {
+    	m_nBufferSize += nBytes;
+	m_pBufferStart = m_pBuffer;
+    }
     else
     {
-      Log(LOGDEBUG, "%s, read buffer returned %d. errno: %d", __FUNCTION__, nBytes, errno);
-      break;
+      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, GetSockError());
+      Close();
+      return false;
     }
-  }
 
   return true;
 }

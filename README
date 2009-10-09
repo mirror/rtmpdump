@@ -1,21 +1,26 @@
-RTMP Dumper v1.3d
+RTMP Dumper v1.4
 (C) 2009 Andrej Stepanchuk
 License: GPLv2
 
-To compile you need the boost libraries, just type
+To compile just type
 
   $ make
 
+or to cross compile
+
+ $ make [win32] CROSS=platform
+
+For example:
+$ make win32 CROSS=mingw32-
+$ make CROSS=arm-linux-
+
+
 To download an rtmp stream use
 
-  $ ./get_iplayer --get 1 --vmode flashhigh --rtmp --rtmpdump "./rtmpdump"
+  $ ./get_iplayer --raw --force --get 1 --vmode flashhigh --rtmp --rtmpdump "./rtmpdump"
 
-Or for hulu.com (US only)
-
-  $ ./get_hulu url quality
-
-The url is just a programme url like "http://www.hulu.com/watch/48466/30-rock-christmas-special"
-and quality is a 0, 1 or 2 to select one of the three available streams, use 1 for high quality rtmp.
+rtmpdump still supports hulu (only the non RTMPE streams for now) if you can invoke it with
+a correct rtmp url.
 
 Credit goes to team boxee for the XBMC RTMP code used in RTMPDumper.
 

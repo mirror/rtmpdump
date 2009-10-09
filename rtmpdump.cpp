@@ -17,32 +17,54 @@
  *  http://www.gnu.org/copyleft/gpl.html
  *
  */
-#include <string>
-#include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <signal.h> // to catch Ctrl-C
 
+#include <signal.h> // to catch Ctrl-C
 #include <getopt.h>
+
+#ifdef WIN32
+#include <winsock.h>
+#endif
 
 #include "rtmp.h"
 #include "log.h"
 #include "AMFObject.h"
+#include "parseurl.h"
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.3d"
+#define RTMPDUMP_VERSION	"v1.4"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
 #define RD_INCOMPLETE		2
+
+inline void InitSockets() {
+#ifdef WIN32
+        WORD version;
+        WSADATA wsaData;
+
+        version = MAKEWORD(1,1);
+        WSAStartup(version, &wsaData);
+#endif
+}
+
+inline void CleanupSockets() {
+#ifdef WIN32
+        WSACleanup();
+#endif
+}
 
 uint32_t nTimeStamp = 0;
 
 #ifdef _DEBUG
 uint32_t debugTS = 0;
 int pnum=0;
+
+FILE *netstackdump = 0;
 #endif
 
 uint32_t nIgnoredFlvFrameCounter = 0;
@@ -99,7 +121,7 @@ int WriteStream(
 		}
 #ifdef _DEBUG
 		debugTS += packet.m_nInfoField1;
-		Log(LOGDEBUG, "type: %d, size: %d, TS: %d ms, sent TS: %d ms", packet.m_packetType, nPacketLen, debugTS, packet.m_nInfoField1);
+		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, sent TS: %d ms", packet.m_packetType, nPacketLen, debugTS, packet.m_nInfoField1);
 		if(packet.m_packetType == 0x09)
 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
 #endif
@@ -141,11 +163,11 @@ int WriteStream(
 				// hande FLV streams, even though the server resends the keyframe as an extra video packet
 				// it is also included in the first FLV stream chunk and we have to compare it and
 				// filter it out !!
+				//
 				if(packet.m_packetType == 0x16) {
 					// basically we have to find the keyframe with the correct TS being nTimeStamp
 					unsigned int pos=0;
 					uint32_t ts = 0;
-					//bool bFound = false;
 
                         		while(pos+11 < nPacketLen) {
                                 		uint32_t dataSize = CRTMP::ReadInt24(packetBody+pos+1); // size without header (11) and prevTagSize (4)
@@ -177,8 +199,9 @@ int WriteStream(
 
 								goto stopKeyframeSearch;
 
-							} else if(nTimeStamp < ts)
+							} else if(nTimeStamp < ts) {
 								goto stopKeyframeSearch; // the timestamp ts will only increase with further packets, wait for seek
+							}
 						} 
                                 		pos += (11+dataSize+4);
                         		}
@@ -194,6 +217,18 @@ stopKeyframeSearch:
 					}//*/
 				}
 			}
+		}
+		
+		if(bNoHeader && packet.m_nInfoField1 > 0 && (bFoundFlvKeyframe || bFoundKeyframe)) {
+			// another problem is that the server can actually change from 09/08 video/audio packets to an FLV stream
+			// or vice versa and our keyframe check will prevent us from going along with the new stream if we resumed
+			//
+			// in this case set the 'found keyframe' variables to true
+			// We assume that if we found one keyframe somewhere and were already beyond TS > 0 we have written
+			// data to the output which means we can accept all forthcoming data inclusing the change between 08/09 <-> FLV
+			// packets
+			bFoundFlvKeyframe = true;
+			bFoundKeyframe = true;
 		}
 
                 // skip till we find out keyframe (seeking might put us somewhere before it)
@@ -351,8 +386,8 @@ FILE *file = 0;
 bool bCtrlC = false;
 
 void sigIntHandler(int sig) {
-	printf("Catched signal: %d, cleaning up, just a second...\n", sig);
 	bCtrlC = true;
+	printf("Caught signal: %d, cleaning up, just a second...\n", sig);
 	signal(SIGINT, SIG_DFL);
 }
 
@@ -385,7 +420,12 @@ int main(int argc, char **argv)
 	uint32_t nInitialFrameSize = 0;
 	int initialFrameType = 0; // tye: audio or video
 
-	char *url = 0;
+	char *hostname = 0;
+	char *playpath = 0;
+	int port = -1;
+	int protocol = RTMP_PROTOCOL_UNDEFINED;
+
+	char *rtmpurl = 0;
 	char *swfUrl = 0;
 	char *tcUrl = 0;
 	char *pageUrl = 0;
@@ -403,6 +443,10 @@ int main(int argc, char **argv)
 	int opt;
 	struct option longopts[] = {
 		{"help",    0, NULL, 'h'},
+		{"host",    1, NULL, 'n'},
+		{"port",    1, NULL, 'c'},
+		{"protocol",1, NULL, 'l'},
+		{"playpath",1, NULL, 'y'},
 		{"rtmp",    1, NULL, 'r'},
 		{"swfUrl",  1, NULL, 's'},
 		{"tcUrl",   1, NULL, 't'},
@@ -417,12 +461,16 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, sigIntHandler);
 
-	while((opt = getopt_long(argc, argv, "hr:s:t:p:a:f:o:u:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hr:s:t:p:a:f:o:u:n:c:l:y:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
-				printf("\nThis program dumps the media contnt streamed over rtmp.\n\n");
+				printf("\nThis program dumps the media content streamed over rtmp.\n\n");
 				printf("--help|-h\t\tPrints this help screen.\n");
 				printf("--rtmp|-r url\t\tURL (e.g. rtmp//hotname[:port]/path)\n");
+				printf("--host|-n hostname\t\tOverrides the hostname in the rtmp url\n");
+				printf("--port|-c port\t\tOverrides the port in the rtmp url\n");
+				printf("--protocol|-l\t\tOverrides the protocol in the rtmp url (0 - RTMP)\n");
+				printf("--playpath|-y\t\tOverrides the playpath parsed from rtmp url\n");
 				printf("--swfUrl|-s url\t\tURL to player swf file\n");
 				printf("--tcUrl|-t url\t\tURL to played stream\n");
 				printf("--pageUrl|-p url\tWeb URL of played programme\n");
@@ -434,9 +482,54 @@ int main(int argc, char **argv)
 				printf("If you don't pass parameters for swfUrl, tcUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
 				printf("packet.\n\n");
 				return RD_SUCCESS;
-			case 'r':
-				url = optarg;
+			case 'n':
+				hostname = optarg;
 				break;
+			case 'c':
+				port = atoi(optarg);
+				break;
+			case 'l':
+				protocol = atoi(optarg);
+				if(protocol != 0) {
+					Log(LOGERROR, "Unknown protocol specified: %d", protocol);
+					return RD_FAILED;
+				}
+				break;
+			case 'y':
+				playpath = optarg;
+				break;
+			case 'r':
+			{
+				rtmpurl = optarg;
+
+				/*if(!IsUrlValid(optarg)) {
+					Log(LOGWARNING, "The specified url (%s) is invalid!", optarg);
+				} 
+				else 
+				{*/
+					char *parsedHost = 0;
+					unsigned int parsedPort = 0;
+					char *parsedPlaypath = 0;
+					char *parsedApp = 0;
+					int parsedProtocol = RTMP_PROTOCOL_UNDEFINED;
+
+					if(!ParseUrl(rtmpurl, &parsedProtocol, &parsedHost, &parsedPort, &parsedPlaypath, &parsedApp)) {
+						Log(LOGWARNING, "Couldn't parse the specified url (%s)!", optarg);
+					} else {
+						if(hostname == 0)
+							hostname = parsedHost;
+						if(port == -1)
+							port = parsedPort;
+						if(playpath == 0)
+							playpath = parsedPlaypath;
+						if(protocol == RTMP_PROTOCOL_UNDEFINED)
+							protocol = parsedProtocol;
+						if(app == 0)
+							app = parsedApp;
+					}
+				//}
+				break;
+			}
 			case 's':
 				swfUrl = optarg;
 				break;
@@ -467,9 +560,22 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if(url == 0) {
-		printf("ERROR: You must specify a url (-r \"rtmp://host[:port]/playpath\" )\n");
+	if(hostname == 0) {
+		Log(LOGERROR, "You must specify a hostname (--host) or url (-r \"rtmp://host[:port]/playpath\") containing a hostname");
 		return RD_FAILED;
+	}
+	if(playpath == 0) {
+		Log(LOGERROR, "You must specify a playpath (--playpath) or url (-r \"rtmp://host[:port]/playpath\") containing a playpath");
+		return RD_FAILED;
+	}
+		
+	if(port == -1) {
+		Log(LOGWARNING, "You haven't specified a port (--port) or rtmp url (-r), using default port 1935");
+		port = 1935;
+	}
+	if(protocol == RTMP_PROTOCOL_UNDEFINED) {
+		Log(LOGWARNING, "You haven't specified a protocol (--protocol) or rtmp url (-r), using default protocol RTMP");
+		protocol = RTMP_PROTOCOL_RTMP;
 	}
 	if(flvFile == 0) {
 		printf("ERROR: You must specify an output flv file (-o filename)\n");
@@ -478,6 +584,17 @@ int main(int argc, char **argv)
 
 	if(flashVer == 0)
 		flashVer = DEFAULT_FLASH_VER;
+
+	if(tcUrl == 0 && app != 0) {
+		//if(rtmpurl != 0)
+		//	tcUrl = rtmpurl;
+		//else {
+			char str[256]={0};
+			sprintf(str, "%s://%s/%s", "rtmp", hostname, app);
+			tcUrl = (char *)malloc(strlen(str)+1);
+			strcpy(tcUrl, str);
+		//}
+	}
 
 	int bufferSize = 1024*1024;
 	char *buffer = (char *)malloc(bufferSize);
@@ -708,7 +825,11 @@ start:
                 }
 	}
         
-	printf("Connecting to %s ...\n", url);
+	#ifdef _DEBUG
+	netstackdump = fopen("netstackdump", "wb");
+	#endif
+
+	printf("Connecting ...\n");
 /*
 #ifdef _DEBUG_TEST_PLAYSTOP
 	// DEBUG!!!! seek to end if duration known!
@@ -717,7 +838,8 @@ start:
 	if(duration > 0)
 		dSeek = (duration-5.0)*1000.0;
 #endif*/
-	if (!rtmp->Connect(url, tcUrl, swfUrl, pageUrl, app, auth, flashVer, dSeek)) {
+	InitSockets();
+	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, flashVer, dSeek)) {
 		printf("Failed to connect!\n");
 		return RD_FAILED;
 	}
@@ -807,18 +929,25 @@ start:
 		fseek(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
-	if((duration > 0 && percent < 100.0) || bCtrlC || nRead != (-1)) {
+	if((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1)) {
 		Log(LOGWARNING, "Download may be incomplete, try --resume!");
 		nStatus = RD_INCOMPLETE;
 	}
-
-	fclose(file);
 
 clean:
 	printf("Closing connection... ");
 	rtmp->Close();
 	printf("done!\n\n");
 
+	if(file != 0)
+		fclose(file);
+
+	CleanupSockets();
+
+#ifdef _DEBUG
+	if(netstackdump != 0)
+		fclose(netstackdump);
+#endif
 	return nStatus;
 }
 

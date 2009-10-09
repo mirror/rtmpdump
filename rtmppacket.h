@@ -32,6 +32,12 @@
 
 typedef unsigned char BYTE;
 
+typedef struct
+{
+	BYTE Type; // 0x03 RTMP, 0x06 RTMPE
+
+} HANDSHAKE_SIGNATURE;
+
 namespace RTMP_LIB
 {
   class RTMPPacket

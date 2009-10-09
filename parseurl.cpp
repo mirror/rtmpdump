@@ -27,14 +27,7 @@
 #include "parseurl.h"
 
 #include "rtmp.h"
-/*
-#define RTMP_PROTOCOL_RTMP      0
-#define RTMP_PROTOCOL_RTMPT     1 // not yet supported
-#define RTMP_PROTOCOL_RTMPS     2 // not yet supported
-#define RTMP_PROTOCOL_RTMPE     3 // not yet supported
-#define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
-#define RTMP_PROTOCOL_RTMFP     5 // not yet supported
-*/
+
 char *str2lower(char *str, int len)
 {
 	char *res = (char *)malloc(len+1);
@@ -49,28 +42,71 @@ char *str2lower(char *str, int len)
 	return res;
 }
 
-bool IsUrlValid(char *url)
+int chr2hex(char c)
 {
-	return true;
-	/*boost::regex re("^rtmp:\\/\\/[a-zA-Z0-9_\\.\\-]+((:(\\d)+\\/)|\\/)(([0-9a-zA-Z_:;\\+\\-\\.\\!\\\"\\$\\%\\&\\/\\(\\)\\=\\?\\<\\>\\s]*)$|$)");
+	if(c <= 57 && c >= 48)
+        	return c-48;
+        else if(c <= 102 && c >= 97)
+                return c-97+10;
+        
+        return -1;
+}
 
-  	if (!boost::regex_match(url, re))
-        	return false;
-	
-	return true;*/
+int hex2bin(char *str, char **hex)
+{
+	if(!str || !hex)
+		return 0;
+
+	int len = strlen(str);
+
+	if(len % 2 != 0)
+		return 0;
+
+	int ret = len/2;
+
+	*hex = (char *)malloc(ret);
+	if((*hex)==0)
+		return 0;
+
+	char *hexptr = *hex;
+	char *lwo = str2lower(str, len);
+	char *lw = lwo;
+
+	len /= 2;
+
+	while(len) {
+		int d1 = chr2hex(*lw); lw++;
+		int d2 = chr2hex(*lw); lw++;
+
+		if(d1<0 || d2<0) {
+			free(*hex);
+			free(lwo);
+			*hex=NULL;
+			return -1;
+		}
+
+		*hexptr = (unsigned char)(d1*16+d2);
+		hexptr++;
+		len--;
+	}
+
+	free(lwo);
+	return ret;
 }
 
 bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app)
 {
 	assert(url != 0 && protocol != 0 && host != 0 && port != 0 && playpath != 0 && app != 0);
 
-	Log(LOGDEBUG, "parsing...");
+	Log(LOGDEBUG, "Parsing...");
 
 	*protocol = 0; // default: RTMP
 
 	// Old School Parsing
 	char *lw = str2lower(url, 6);
+	char *temp;
 
+	// look for usual :// pattern
 	char *p = strstr(url, "://");
 	int len = (int)(p-url);
 	if(p == 0) {
@@ -104,9 +140,13 @@ parsehost:
 	// lets get the hostname
 	p+=3;
 
-	char *temp;
+	// check for sudden death
+	if(*p==0) {
+		Log(LOGWARNING, "No hostname in URL!");		
+		return false;
+	}
 
-	int iEnd   = strlen(p)-1;
+	int iEnd   = strlen(p);
 	int iCol   = iEnd+1; 
 	int iQues  = iEnd+1;
 	int iSlash = iEnd+1;
@@ -118,7 +158,7 @@ parsehost:
 	if((temp=strstr(p, "/"))!=0)
 	        iSlash = temp-p;
 
-	int min = iSlash < iEnd ? iSlash : iEnd;
+	int min = iSlash < iEnd ? iSlash : iEnd+1;
 	min = iQues   < min ? iQues   : min;
 
 	int hostlen = iCol < min ? iCol : min;
@@ -185,10 +225,10 @@ parsehost:
 	int applen = iEnd+1; // ondemand, pass all parameters as app
 	int appnamelen = 8; // ondemand length
 
-	if(iQues < iEnd) { // whatever it is, the '?' means we need to use everything as app
+	if(iQues < iEnd && strstr(p, "slist=")) { // whatever it is, the '?' and slist= means we need to use everything as app and parse plapath from slist=
 		appnamelen = iQues;
 		applen = iEnd+1; // pass the parameters as well
-	} 
+	}
 	else if(strncmp(p, "ondemand/", 9)==0) {
                 // app = ondemand/foobar, only pass app=ondemand
                 applen = 8;
@@ -213,6 +253,12 @@ parsehost:
 	int iPlaypathPos = -1;
 	int iPlaypathLen = -1;
 
+	bool bAddMP4 = false; // used to add at the end mp4: in front of the playpath
+
+	// here filter out semicolon added parameters, e.g. slist=bla...;abc=def
+	//if((temp=strstr(p, ";"))!=0)
+	//	iEnd = temp-p-1;
+	
 	if(*p=='?' && (temp=strstr(p, "slist="))!=0) {
 		iPlaypathPos = temp-p+6;
 
@@ -222,15 +268,19 @@ parsehost:
 		if(iAnd < iEnd)
 			iPlaypathLen = iAnd-iPlaypathPos;
 		else
-			iPlaypathLen = iEnd-iPlaypathPos+1;
+			iPlaypathLen = iEnd-iPlaypathPos; // +1
 	} else { // no slist parameter, so take string after applen 
 		if(iEnd > 0) {
 			iPlaypathPos = 1;
-			iPlaypathLen = iEnd-iPlaypathPos+1;
+			iPlaypathLen = iEnd-iPlaypathPos;//+1;
 			
 			// filter .flv from playpath specified with slashes: rtmp://host/app/path.flv
-			if(iPlaypathLen >=4 && strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".flv", 4)==0) {
-				iPlaypathLen-=4;
+			if(iPlaypathLen >=4) {
+				if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".f4v", 4)==0 || strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".mp4", 4)==0) {
+					bAddMP4 = true;
+				} else if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".flv", 4)==0) {
+					iPlaypathLen-=4;
+				}
 			}
 		} else {
 			Log(LOGERROR, "No playpath found!");
@@ -238,9 +288,16 @@ parsehost:
 	}
 
 	if(iPlaypathLen > -1) {
-		*playpath = (char *)malloc((iPlaypathLen+1)*sizeof(char));
-		strncpy(*playpath, &p[iPlaypathPos], iPlaypathLen);
-		(*playpath)[iPlaypathLen]=0;
+		*playpath = (char *)malloc((iPlaypathLen+(bAddMP4?4:0)+1)*sizeof(char));
+		char *playpathptr = *playpath;
+
+		if(bAddMP4 && strncmp(&p[iPlaypathPos], "mp4:", 4)!=0) {
+			strcpy(playpathptr, "mp4:");
+			playpathptr+=4;
+		}
+
+		strncpy(playpathptr, &p[iPlaypathPos], iPlaypathLen);
+		playpathptr[iPlaypathLen]=0;
 
 		Log(LOGDEBUG, "Parsed playpath: %s", *playpath);
 	} else {
@@ -248,142 +305,5 @@ parsehost:
 	}
 
         return true;
-	
-
-	//boost::cmatch matches;
-	/*boost::regex re1("^rtmp:\\/\\/([a-zA-Z0-9_\\.\\-]+)((:([0-9]+)\\/)|\\/)[0-9a-zA-Z_:;\\+\\-\\.\\!\\\"\\$\\%\\&\\/\\(\\)\\=\\?\\<\\>\\s]+");
-	if(boost::regex_match(url, matches, re1))
-	{
-		if(matches[1].second-matches[1].first < 512) {
-			*host = (char *)malloc(512*sizeof(char));
-			memcpy(*host, matches[1].first, matches[1].second-matches[1].first);
-			(*host)[matches[1].second-matches[1].first]=0x00;
-			Log(LOGDEBUG, "Hostname: %s", *host);
-		} else {
-			Log(LOGWARNING, "Hostname too long: must not be longer than 255 characters!");
-		}
-
-		char portstr[6];
-		if(matches[4].second-matches[4].first < 6) {
-			strncpy(portstr, matches[4].first, matches[4].second-matches[4].first);
-			portstr[matches[4].second-matches[4].first]=0x00;
-			*port = atoi(portstr);
-		} else {
-			Log(LOGWARNING, "Port too long: must not be longer than 5 digits!");
-		}
-		
-		std::string strPlay;
-		// use slist parameter, if there is one
-		std::string surl = std::string(url);
-		int nPos = surl.find("slist=");
-		if (nPos > 0)
-			strPlay = surl.substr(nPos+6, surl.size()-(nPos+6));
-
-        	if (strPlay.empty()) {
-			// or use last piece of URL, if there's more than one level
-			std::string::size_type pos_slash = surl.find_last_of("/");
-			if ( pos_slash != std::string::npos )
-				strPlay = surl.substr(pos_slash+1, surl.size()-(pos_slash+1));
-		}
-
-		if(!strPlay.empty()){
-			*playpath = (char *)malloc(1024);
-			if(strlen(strPlay.c_str()) < 1024)
-				strcpy(*playpath, strPlay.c_str());
-			else
-				Log(LOGWARNING, "Playpath too long: must not be longer than 1023 characters!");
-		}
-		return true;
-	}*/
-	return false;
 }
-
-/*
- 
-boost::cmatch matches;
-
-  boost::regex re1("^rtmp:\\/\\/([a-zA-Z0-9_\\.\\-]+)((:([0-9]+)\\/)|\\/)[0-9a-zA-Z_:;\\+\\-\\.\\!\\\"\\$\\%\\&\\/\\(\\)\\=\\?\\<\\>\\s]+");
-  if(!boost::regex_match(url, matches, re1))
-  {
-        Log(LOGERROR, "RTMP Connect: Regex for url doesn't match (error in programme)!");
-        return false;
-  }
-  //for(int i=0; i<matches.size(); i++) {
-  //      Log(LOGDEBUG, "matches[%d]: %s, %s", i, matches[i].first, matches[i].second);
-  //}
-
-  if(matches[1].second-matches[1].first > 255) {
-        Log(LOGERROR, "Hostname must not be longer than 255 characters!");
-        return false;
-  }
-  strncpy(Link.hostname, matches[1].first, matches[1].second-matches[1].first);
-
-  Log(LOGDEBUG, "Hostname: %s", Link.hostname);
-
-  char portstr[256];
-  if(matches[4].second-matches[4].first > 5) {
-          Log(LOGERROR, "Port must not be longer than 5 digits!");
-          return false;
-  }
-  strncpy(portstr, matches[4].first, matches[4].second-matches[4].first);
-  Link.port = atoi(portstr);
-
-*/
-// obtain auth string if available
-  /*
-  boost::regex re2("^.*auth\\=([0-9a-zA-Z_:;\\-\\.\\!\\\"\\$\\%\\/\\(\\)\\=\\s]+)((&.+$)|$)");
-  boost::cmatch matches2;
-  
-  if(boost::regex_match(url, matches2, re2)) {
-    int len = matches2[1].second-matches2[1].first;
-    if(len > 255) {
-        Log(LOGERROR, "Auth string must not be longer than 255 characters!");
-    }
-    Link.auth = (char *)malloc((len+1)*sizeof(char));
-    strncpy(Link.auth, matches2[1].first, len);
-    Link.auth[len]=0;
-
-    Log(LOGDEBUG, "Auth: %s", Link.auth);
-  } else { Link.auth = 0; }
-  //*/
-/*
-// use m_strPlayPath
-  std::string strPlay;// = m_strPlayPath;
-  //if (strPlay.empty())
-  //{
-    // or use slist parameter, if there is one
-    std::string url = std::string(Link.url);
-    int nPos = url.find("slist=");
-    if (nPos > 0)
-      strPlay = url.substr(nPos+6, url.size()-(nPos+6)); //Mid(nPos + 6);
-
-                if (strPlay.empty())
-                {
-                        // or use last piece of URL, if there's more than one level
-                        std::string::size_type pos_slash = url.find_last_of("/");
-                        if ( pos_slash != std::string::npos )
-                                strPlay = url.substr(pos_slash+1, url.size()-(pos_slash+1)); //Mid(pos_slash+1);
-                }
-
-                if (strPlay.empty()){
-                        Log(LOGERROR, "%s, no name to play!", __FUNCTION__);
-                        return false;
-                }
-  //}
-*/
-
-
-//CURL url(m_strLink);
-  /*std::string app = std::string(Link.url);
-
-  std::string::size_type slistPos = std::string(Link.url).find("slist=");
-  if ( slistPos == std::string::npos ){
-    // no slist parameter. send the path as the app
-    // if URL path contains a slash, use the part up to that as the app
-    // as we'll send the part after the slash as the thing to play
-    std::string::size_type pos_slash = app.find_last_of("/");
-    if( pos_slash != std::string::npos ){
-      app = app.substr(0,pos_slash);
-    }
-  }*/
 

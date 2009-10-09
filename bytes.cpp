@@ -20,8 +20,6 @@
 
 #include <string.h>
 #include <sys/types.h>
-//#include <endian.h>
-//#include <byteswap.h>
 #include "bytes.h"
 
 // write dVal as 64bit little endian double
@@ -31,7 +29,7 @@ void WriteNumber(char *data, double dVal)
 
 #if __FLOAT_WORD_ORDER == __BYTE_ORDER
 #if __BYTE_ORDER == __BIG_ENDIAN
-	res = dVal;
+	res = *((uint64_t*)&dVal);
 #elif __BYTE_ORDER == __LITTLE_ENDIAN
         uint64_t in  = *((uint64_t*)&dVal);
         res = __bswap_64(in);

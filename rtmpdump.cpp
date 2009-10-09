@@ -36,7 +36,7 @@
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.4"
+#define RTMPDUMP_VERSION	"v1.5"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -65,34 +65,52 @@ uint32_t debugTS = 0;
 int pnum=0;
 
 FILE *netstackdump = 0;
+FILE *netstackdump_read = 0;
 #endif
 
 uint32_t nIgnoredFlvFrameCounter = 0;
 uint32_t nIgnoredFrameCounter = 0;
-#define MAX_IGNORED_FRAMES	50	
+#define MAX_IGNORED_FRAMES	50
+
+int WriteHeader(
+	        char **buf,                     // target pointer, maybe preallocated
+                unsigned int len                // length of buffer if preallocated
+	)
+{
+        char flvHeader[] = { 'F', 'L', 'V', 0x01,
+                             0x05, // video + audio, we finalize later if the value is different
+                             0x00, 0x00, 0x00, 0x09,
+                             0x00, 0x00, 0x00, 0x00 // first prevTagSize=0
+        };
+
+	unsigned int size = sizeof(flvHeader);
+
+	if(size > len) {
+        	*buf = (char *)realloc(*buf,  size);
+                if(*buf == 0) {
+                	Log(LOGERROR, "Couldn't reallocate memory!");
+                        return -1; // fatal error
+                }
+        }
+	memcpy(*buf, flvHeader, sizeof(flvHeader));
+	return size;
+}
 
 int WriteStream(
 		CRTMP* rtmp, 
 		char **buf,			// target pointer, maybe preallocated
 		unsigned int len, 		// length of buffer if preallocated
 		uint32_t *tsm, 			// pointer to timestamp, will contain timestamp of last video packet returned
-		bool bNoHeader, 		// resuming mode, will not write FLV header and compare metaHeader and first kexframe
-		char *metaHeader, 		// pointer to meta header (if bNoHeader == TRUE)
-		uint32_t nMetaHeaderSize,	// length of meta header, if zero meta header check omitted (if bNoHeader == TRUE)
-		char *initialFrame,		// pointer to initial keyframe (no FLV header or tagSize, raw data) (if bNoHeader == TRUE)
+		bool bResume, 		        // resuming mode, will not write FLV header and compare metaHeader and first kexframe
+		char *metaHeader, 		// pointer to meta header (if bResume == TRUE)
+		uint32_t nMetaHeaderSize,	// length of meta header, if zero meta header check omitted (if bResume == TRUE)
+		char *initialFrame,		// pointer to initial keyframe (no FLV header or tagSize, raw data) (if bResume == TRUE)
 		uint8_t initialFrameType,	// initial frame type (audio or video)
-		uint32_t nInitialFrameSize,	// length of initial frame in bytes, if zero initial frame check omitted (if bNoHeader == TRUE)
+		uint32_t nInitialFrameSize,	// length of initial frame in bytes, if zero initial frame check omitted (if bResume == TRUE)
 		uint8_t *dataType		// whenever we get a video/audio packet we set an appropriate flag here, this will be later written to the FLV header
 	)
 {
-	char flvHeader[] = { 'F', 'L', 'V', 0x01,
-                             0x00,//5, // video + audio
-                             0x00, 0x00, 0x00, 0x09,
-                             0x00, 0x00, 0x00, 0x00 // first prevTagSize=0
-	};
-	
 	static bool bStopIgnoring = false;
-	static bool bSentHeader = false;
 	static bool bFoundKeyframe = false;
 	static bool bFoundFlvKeyframe = false;
 
@@ -127,7 +145,7 @@ int WriteStream(
 #endif
 
 		// check the header if we get one
-		if(bNoHeader && packet.m_nInfoField1 == 0) {
+		if(bResume && packet.m_nInfoField1 == 0) {
 			if(nMetaHeaderSize > 0 && packet.m_packetType == 0x12) {
 			
 				RTMP_LIB::AMFObject metaObj;
@@ -179,7 +197,7 @@ int WriteStream(
 						                                                packetBody[pos], dataSize, ts);
 						#endif
 						// ok, is it a keyframe!!!: well doesn't work for audio!
-						if(packetBody[0] == initialFrameType /* && (packetBody[11]&0xf0) == 0x10*/) {
+						if(packetBody[pos /*6928, test 0*/] == initialFrameType /* && (packetBody[11]&0xf0) == 0x10*/) {
 							if(ts == nTimeStamp) {
 								Log(LOGDEBUG, "Found keyframe with resume-keyframe timestamp!");
 								if(nInitialFrameSize != dataSize || memcmp(initialFrame, packetBody+pos+11, nInitialFrameSize) != 0) {
@@ -210,16 +228,15 @@ int WriteStream(
 					}
 stopKeyframeSearch:
 					;
-					//*
 					if(!bFoundFlvKeyframe) {
 						Log(LOGERROR, "Couldn't find the seeked keyframe in this chunk!");
-						return 0;//-2;
-					}//*/
+						return 0;
+					}
 				}
 			}
 		}
 		
-		if(bNoHeader && packet.m_nInfoField1 > 0 && (bFoundFlvKeyframe || bFoundKeyframe)) {
+		if(bResume && packet.m_nInfoField1 > 0 && (bFoundFlvKeyframe || bFoundKeyframe)) {
 			// another problem is that the server can actually change from 09/08 video/audio packets to an FLV stream
 			// or vice versa and our keyframe check will prevent us from going along with the new stream if we resumed
 			//
@@ -232,15 +249,15 @@ stopKeyframeSearch:
 		}
 
                 // skip till we find out keyframe (seeking might put us somewhere before it)
-		if(bNoHeader && !bFoundKeyframe && packet.m_packetType != 0x16) {
+		if(bResume && !bFoundKeyframe && packet.m_packetType != 0x16) {
                         Log(LOGWARNING, "Stream does not start with requested frame, ignoring data... ");
                         nIgnoredFrameCounter++;
                         if(nIgnoredFrameCounter > MAX_IGNORED_FRAMES)
-                                return -2;
+                                return -2; // fatal error, couldn't continue stream
                         return 0;
                 }
 		// ok, do the same for FLV streams
-		if(bNoHeader && !bFoundFlvKeyframe && packet.m_packetType == 0x16) {
+		if(bResume && !bFoundFlvKeyframe && packet.m_packetType == 0x16) {
                         Log(LOGWARNING, "Stream does not start with requested FLV frame, ignoring data... ");
                         nIgnoredFlvFrameCounter++;
                         if(nIgnoredFlvFrameCounter > MAX_IGNORED_FRAMES)
@@ -248,10 +265,10 @@ stopKeyframeSearch:
                         return 0;
                 }	
 
-		// if bNoHeader, we continue a stream, we have to ignore the 0ms frames since these are the first keyframes, we've got these
+		// if bResume, we continue a stream, we have to ignore the 0ms frames since these are the first keyframes, we've got these
 		// so don't mess around with multiple copies sent by the server to us! (if the keyframe is found at a later position
 		// there is only one copy and it will be ignored by the preceding if clause)
-		if(!bStopIgnoring && bNoHeader && packet.m_packetType != 0x16) { // exclude type 0x16 (FLV) since it can conatin several FLV packets
+		if(!bStopIgnoring && bResume && packet.m_packetType != 0x16) { // exclude type 0x16 (FLV) since it can conatin several FLV packets
 			if(packet.m_nInfoField1 == 0) {
 				return 0;
 			} else {
@@ -261,7 +278,6 @@ stopKeyframeSearch:
 
 		// calculate packet size and reallocate buffer if necessary
 		unsigned int size = nPacketLen 
-			+ ((bSentHeader || bNoHeader) ? 0 : sizeof(flvHeader))
 			+ ((packet.m_packetType == 0x08 || packet.m_packetType == 0x09 || packet.m_packetType == 0x12) ? 11 : 0)
 			+ (packet.m_packetType != 0x16 ? 4 : 0);
 		
@@ -274,13 +290,6 @@ stopKeyframeSearch:
 		}
 		char *ptr = *buf;
 
-		if(!bSentHeader && !bNoHeader)
-		{
-			memcpy(ptr, flvHeader, sizeof(flvHeader));
-			ptr+=sizeof(flvHeader);
-
-			bSentHeader = true;
-		}
 		// audio (0x08), video (0x09) or metadata (0x12) packets :
 		// construct 11 byte header then add rtmp packet's data
 		if(packet.m_packetType == 0x08 || packet.m_packetType == 0x09 || packet.m_packetType == 0x12)
@@ -330,15 +339,24 @@ stopKeyframeSearch:
 		{
 			unsigned int pos=0;
 
-                        while(pos+11 < nPacketLen) {
-                        	uint32_t dataSize = CRTMP::ReadInt24(packetBody+pos+1); // size without header (11) or prevTagSize (4)
+                        while(pos+11 < nPacketLen) 
+			{
+				uint32_t dataSize = CRTMP::ReadInt24(packetBody+pos+1); // size without header (11) and without prevTagSize (4)
                                 nTimeStamp = CRTMP::ReadInt24(packetBody+pos+4);
                                 nTimeStamp |= (packetBody[pos+7]<<24);
-				
+
+				/*
+				CRTMP::EncodeInt24(ptr+pos+4, nTimeStamp);
+				ptr[pos+7] = (nTimeStamp>>24)&0xff;//*/
+
 				// set data type
 				*dataType |= (((*(packetBody+pos) == 0x08)<<2)|(*(packetBody+pos) == 0x09));
 
                                 if(pos+11+dataSize+4 > nPacketLen) {
+					if(pos+11+dataSize > nPacketLen) {
+						Log(LOGERROR, "Wrong data size (%lu), stream corrupted, aborting!", dataSize);
+						return -2;
+					}
                                 	Log(LOGWARNING, "No tagSize found, appending!");
                                                 
 					// we have to append a last tagSize!
@@ -349,13 +367,13 @@ stopKeyframeSearch:
                                         prevTagSize = CRTMP::ReadInt32(packetBody+pos+11+dataSize);
                                         
 					#ifdef _DEBUG
-					Log(LOGDEBUG, "FLV Packet: type %02X, dataSize: %d, tagSize: %d, timeStamp: %d ms",
-                                                packetBody[pos], dataSize, prevTagSize, nTimeStamp);
+					Log(LOGDEBUG, "FLV Packet: type %02X, dataSize: %lu, tagSize: %lu, timeStamp: %lu ms",
+                                                (unsigned char)packetBody[pos], dataSize, prevTagSize, nTimeStamp);
 					#endif
 
                                         if(prevTagSize != (dataSize+11)) {
                                                 #ifdef _DEBUG
-						Log(LOGWARNING, "tag size and data size are not consitent, writing tag size according to data size %d", dataSize+11);
+						Log(LOGWARNING, "Tag and data size are not consitent, writing tag size according to dataSize+11: %d", dataSize+11);
                                                 #endif
 
 						prevTagSize = dataSize+11;
@@ -363,7 +381,7 @@ stopKeyframeSearch:
                                         }
                                 }
 
-                                pos += (11+dataSize+4);
+                                pos += prevTagSize+4;//(11+dataSize+4);
 			}
 		}
 		ptr += len;
@@ -387,7 +405,7 @@ bool bCtrlC = false;
 
 void sigIntHandler(int sig) {
 	bCtrlC = true;
-	printf("Caught signal: %d, cleaning up, just a second...\n", sig);
+	LogPrintf("Caught signal: %d, cleaning up, just a second...\n", sig);
 	signal(SIGINT, SIG_DFL);
 }
 
@@ -395,6 +413,8 @@ void sigIntHandler(int sig) {
 
 int main(int argc, char **argv)
 {
+	extern char *optarg;
+
 //#ifdef _DEBUG_TEST_PLAYSTOP
 //	RTMPPacket packet;
 //#endif
@@ -404,8 +424,12 @@ int main(int argc, char **argv)
 
 	uint8_t dataType = 0;    // will be written into the FLV header (position 4)
 
+	int nSkipKeyFrames = 0;  // skip this number of keyframes when resuming
+
+	bool bOverrideBufferTime = false; // if the user specifies a buffer time override this is true
+	bool bStdoutMode = false;// if true print the stream directly to stdout, messages go to stderr
 	bool bResume = false;    // true in resume mode
-	bool bNoHeader = false;  // in resume mode this will tell not to write an FLV header again
+	//bool bNoHeader = false;  // in resume mode this will tell not to write an FLV header again
 	bool bAudioOnly = false; // when resuming this will tell whether its an audio only stream
 	uint32_t dSeek = 0;	 // seek position in resume mode, 0 otherwise
 	uint32_t bufferTime = 10*60*60*1000; // 10 hours as default
@@ -424,6 +448,9 @@ int main(int argc, char **argv)
 	char *playpath = 0;
 	int port = -1;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
+	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
+
+	long int timeout = 300; // timeout connection afte 300 seconds
 
 	char *rtmpurl = 0;
 	char *swfUrl = 0;
@@ -431,14 +458,16 @@ int main(int argc, char **argv)
 	char *pageUrl = 0;
 	char *app = 0;
 	char *auth = 0;
+	char *swfHash = 0;
+	uint32_t swfSize = 0;
 	char *flashVer = 0;
 
 	char *flvFile = 0;
 
 	char DEFAULT_FLASH_VER[]  = "LNX 9,0,124,0";
 
- 	printf("RTMPDump %s\n", RTMPDUMP_VERSION);
-	printf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
+ 	LogPrintf("RTMPDump %s\n", RTMPDUMP_VERSION);
+	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
 
 	int opt;
 	struct option longopts[] = {
@@ -453,35 +482,91 @@ int main(int argc, char **argv)
 		{"pageUrl", 1, NULL, 'p'},
 		{"app",     1, NULL, 'a'},
 		{"auth",    1, NULL, 'u'},
+		{"swfhash", 1, NULL, 'w'},
+		{"swfsize", 1, NULL, 'x'},
 		{"flashVer",1, NULL, 'f'},
+		{"live"	   ,0, NULL, 'v'},
 		{"flv",     1, NULL, 'o'},
 		{"resume",  0, NULL, 'e'},
+		{"timeout", 1, NULL, 'm'},
+		{"buffer",  1, NULL, 'b'},
+		{"skip",    1, NULL, 'k'},
 		{0,0,0,0}
 	};
 
 	signal(SIGINT, sigIntHandler);
 
-	while((opt = getopt_long(argc, argv, "hr:s:t:p:a:f:o:u:n:c:l:y:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hver:s:t:p:a:f:o:u:n:c:l:y:m:k:w:x:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
-				printf("\nThis program dumps the media content streamed over rtmp.\n\n");
-				printf("--help|-h\t\tPrints this help screen.\n");
-				printf("--rtmp|-r url\t\tURL (e.g. rtmp//hotname[:port]/path)\n");
-				printf("--host|-n hostname\t\tOverrides the hostname in the rtmp url\n");
-				printf("--port|-c port\t\tOverrides the port in the rtmp url\n");
-				printf("--protocol|-l\t\tOverrides the protocol in the rtmp url (0 - RTMP)\n");
-				printf("--playpath|-y\t\tOverrides the playpath parsed from rtmp url\n");
-				printf("--swfUrl|-s url\t\tURL to player swf file\n");
-				printf("--tcUrl|-t url\t\tURL to played stream\n");
-				printf("--pageUrl|-p url\tWeb URL of played programme\n");
-				printf("--app|-a app\t\tName of player used\n");
-				printf("--auth|-u string\tAuthentication string to be appended to the connect string\n");
-				printf("--flashVer|-f string\tflash version string (default: \"LNX 9,0,124,0\")\n");
-				printf("--flv|-o string\t\tflv output file name\n\n");
-				printf("--resume|-e\n\n");
-				printf("If you don't pass parameters for swfUrl, tcUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
-				printf("packet.\n\n");
+				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");
+				LogPrintf("--help|-h               Prints this help screen.\n");
+				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
+				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
+				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
+				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP, 3 - RTMPE)\n");
+				LogPrintf("--playpath|-y           Overrides the playpath parsed from rtmp url\n");
+				LogPrintf("--swfUrl|-s url         URL to player swf file\n");
+				LogPrintf("--tcUrl|-t url          URL to played stream (default: \"rtmp://host[:port]/app\")\n");
+				LogPrintf("--pageUrl|-p url        Web URL of played programme\n");
+				LogPrintf("--app|-a app            Name of player used\n");
+				LogPrintf("--swfhash|-w hexstring  SHA256 hash of the decompressed SWF file (32 bytes)\n");
+				LogPrintf("--swfsize|-x num        Size of the decompressed SWF file, required for SWFVerification\n");
+				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
+				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
+				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live strems possible\n");
+				LogPrintf("--flv|-o string         FLV output file name, if the file name is - print stream to stdout\n");
+				LogPrintf("--resume|-e             Resume a partial RTMP download\n");
+				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
+				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
+					bufferTime);
+				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
+					nSkipKeyFrames);
+				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
+				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
+			case 'w':
+			{
+				int res = hex2bin(optarg, &swfHash);
+				if(res!=32) {
+					swfHash = NULL;
+					Log(LOGWARNING, "Couldn't parse swf hash hex string, not heyxstring or not 32 bytes, ignoring!");
+				}
+				break;
+			}
+			case 'x':
+			{
+				int size = atoi(optarg);
+				if(size <= 0) {
+					Log(LOGERROR, "SWF Size must be at least 1, ignoring\n");
+				} else {
+					swfSize = size;
+				}
+				break;
+			}
+			case 'k':
+				nSkipKeyFrames = atoi(optarg);
+				if(nSkipKeyFrames < 0) {
+					Log(LOGERROR, "Number of keyframes skipped must be greater or equal zero, using zero!");
+					nSkipKeyFrames = 0;
+				} else {
+					Log(LOGDEBUG, "Number of skipped key frames for resume: %d", nSkipKeyFrames);
+				}
+				break;
+			case 'b':
+			{
+				int32_t bt = atol(optarg);
+				if(bt < 0) {
+					Log(LOGERROR, "Buffer time must be greater than zero, ignoring the specified value %d!", bt);
+				} else {
+					bufferTime = bt;
+					bOverrideBufferTime = true;
+				}
+				break;
+			}
+			case 'v':
+				bLiveStream = true; // no seeking or resuming possible!
+				break;
 			case 'n':
 				hostname = optarg;
 				break;
@@ -490,7 +575,7 @@ int main(int argc, char **argv)
 				break;
 			case 'l':
 				protocol = atoi(optarg);
-				if(protocol != 0) {
+				if(protocol != RTMP_PROTOCOL_RTMP && protocol != RTMP_PROTOCOL_RTMPE) {
 					Log(LOGERROR, "Unknown protocol specified: %d", protocol);
 					return RD_FAILED;
 				}
@@ -547,6 +632,9 @@ int main(int argc, char **argv)
 				break;
 			case 'o':
 				flvFile = optarg;
+				if(strcmp(flvFile, "-")==0)
+					bStdoutMode = true;
+
 				break;
 			case 'e':
 				bResume = true;
@@ -554,8 +642,11 @@ int main(int argc, char **argv)
 			case 'u':
 				auth = optarg;		
 				break;
+			case 'm':
+				timeout = atoi(optarg);
+				break;
 			default:
-				printf("unknown option: %c\n", opt);
+				LogPrintf("unknown option: %c\n", opt);
 				break;
 		}
 	}
@@ -573,13 +664,36 @@ int main(int argc, char **argv)
 		Log(LOGWARNING, "You haven't specified a port (--port) or rtmp url (-r), using default port 1935");
 		port = 1935;
 	}
+	if(port == 0) {
+		port = 1935;
+	}
 	if(protocol == RTMP_PROTOCOL_UNDEFINED) {
 		Log(LOGWARNING, "You haven't specified a protocol (--protocol) or rtmp url (-r), using default protocol RTMP");
 		protocol = RTMP_PROTOCOL_RTMP;
 	}
 	if(flvFile == 0) {
-		printf("ERROR: You must specify an output flv file (-o filename)\n");
+		Log(LOGERROR, "You must specify an output flv file (-o filename)");
 		return RD_FAILED;
+	}
+
+	if(bStdoutMode && bResume) {
+		Log(LOGWARNING, "Can't resume in stdout mode, ignoring --resume option");
+		bResume = false;
+	}
+
+	if(bLiveStream && bResume) {
+		Log(LOGWARNING, "Can't resume live stream, ignoring --resume option");
+		bResume = false;
+	}
+
+	if(swfHash == 0 && swfSize > 0) {
+		Log(LOGWARNING, "Ignoring SWF size, supply also the hash with --swfhash");
+		swfSize=0;
+	}
+
+	if(swfHash != 0 && swfSize == 0) {
+		Log(LOGWARNING, "Ignoring SWF hash, supply also the swf size  with --swfsize");
+		swfHash=NULL;
 	}
 
 	if(flashVer == 0)
@@ -589,8 +703,8 @@ int main(int argc, char **argv)
 		//if(rtmpurl != 0)
 		//	tcUrl = rtmpurl;
 		//else {
-			char str[256]={0};
-			sprintf(str, "%s://%s/%s", "rtmp", hostname, app);
+			char str[512]={0};
+			snprintf(str, 511, "%s://%s:%d/%s", RTMPProtocolStringsLower[protocol], inet_ntoa(*(struct in_addr*)gethostbyname(hostname)->h_addr), port, app);
 			tcUrl = (char *)malloc(strlen(str)+1);
 			strcpy(tcUrl, str);
 		//}
@@ -718,6 +832,7 @@ int main(int argc, char **argv)
 
 				// go through the file and find the last video keyframe
 				do {
+skipkeyframe:
 					if(size-tsize < 13) {
 						Log(LOGERROR, "Unexpected start of file, error in tag sizes, couldn't arrive at prevTagSize=0");
 						nStatus = RD_FAILED; goto clean;
@@ -755,6 +870,21 @@ int main(int argc, char **argv)
 					ts |= (buffer[7]<<24);
 					Log(LOGDEBUG, "%02X: TS: %d ms", buffer[0], ts);
 					#endif	//*/
+
+					// this just continues the loop whenever the number of skipped frames is > 0,
+					// so we look for the next keyframe to continue with
+					//
+					// this helps if resuming from the last keyframe fails and one doesn't want to start
+					// the download from the beginning
+					//
+					if(nSkipKeyFrames > 0 && !(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))) {
+						#ifdef _DEBUG
+						Log(LOGDEBUG, "xxxxxxxxxxxxxxxxxxxxxxxx Well, lets go one more back!");
+						#endif
+						nSkipKeyFrames--;
+						goto skipkeyframe;
+					}
+
 				} while(
 						(bAudioOnly && buffer[0] != 0x08) ||
 						(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))
@@ -805,63 +935,61 @@ int main(int argc, char **argv)
 			Log(LOGDEBUG, "Previuos timestamp: %d ms", timestamp);
 			*/
 
-			// seek to position after keyframe in our file (we will ignore the keyframes resent by the server
-			// since they are sent a couple of times and handling this would be a mess)
-			fseek(file, size-tsize+prevTagSize+4, SEEK_SET);
+			if(dSeek == 0) {
+                                Log(LOGDEBUG, "Last keyframe is first frame in stream, switching from resume to normal mode!");
+                                bResume = false;
+				goto start;
+                        } 
+			else 
+			{
+				// seek to position after keyframe in our file (we will ignore the keyframes resent by the server
+				// since they are sent a couple of times and handling this would be a mess)
+				fseek(file, size-tsize+prevTagSize+4, SEEK_SET);
 			
-			// make sure the WriteStream doesn't write headers and ignores all the 0ms TS packets
-			// (including several meta data headers and the keyframe we seeked to)
-			bNoHeader = true;
+				// make sure the WriteStream doesn't write headers and ignores all the 0ms TS packets
+				// (including several meta data headers and the keyframe we seeked to)
+				//bNoHeader = true; if bResume==true this is true anyway
+			}
 		}
 	} else {
 start:
 		if(file != 0)
 			fclose(file);
 
-		file = fopen(flvFile, "wb");
-		if(file == 0) {
-                        printf("Failed to open file!\n");
-                        return RD_FAILED;
-                }
+		if(bStdoutMode)
+			file = stdout;
+		else
+		{
+			file = fopen(flvFile, "wb");
+			if(file == 0) {
+                        	LogPrintf("Failed to open file!\n");
+                        	return RD_FAILED;
+                	}
+		}
 	}
-        
+       
 	#ifdef _DEBUG
 	netstackdump = fopen("netstackdump", "wb");
+	netstackdump_read = fopen("netstackdump_read", "wb");
 	#endif
 
-	printf("Connecting ...\n");
-/*
-#ifdef _DEBUG_TEST_PLAYSTOP
-	// DEBUG!!!! seek to end if duration known!
-	printf("duration: %f", duration);
-	//return 1;
-	if(duration > 0)
-		dSeek = (duration-5.0)*1000.0;
-#endif*/
+	LogPrintf("Connecting ...\n");
+	
 	InitSockets();
-	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, flashVer, dSeek)) {
-		printf("Failed to connect!\n");
+
+	//{ // here we decrease the seek time by 10ms to make sure the server starts with the next keyframe
+	//double dFindSeek = dSeek;
+
+	//if(!bAudioOnly && dFindSeek >= 10.0)
+	//	dFindSeek-=10.0;
+
+	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, swfHash, swfSize, flashVer, dSeek, bLiveStream, timeout)) {
+		LogPrintf("Failed to connect!\n");
 		return RD_FAILED;
 	}
-	printf("Connected...\n\n");
-
-/*
-	// DEBUG read out packets
-#ifdef _DEBUG_TEST_PLAYSTOP
-	printf("duration: %f", duration);
-	while(rtmp->IsConnected() && rtmp->GetNextMediaPacket(packet)) {
-		char str[256]={0};
-        sprintf(str, "packet%d", pnum);
-        pnum++;
-        FILE *f = fopen(str, "wb");
-        fwrite(packet.m_body, 1, packet.m_nBodySize, f);
-        fclose(f);
-		
-		printf(".");
-	}
-	return 1;
-#endif
-*/
+	LogPrintf("Connected...\n\n");
+	//}
+	
 	#ifdef _DEBUG
 	debugTS = dSeek;
 	#endif
@@ -869,35 +997,56 @@ start:
 	timestamp  = dSeek;
 	nTimeStamp = dSeek; // set offset if we continue	
 	if(dSeek != 0) {
-		printf("Continuing at TS: %d ms\n", nTimeStamp);
+		LogPrintf("Continuing at TS: %d ms\n", nTimeStamp);
 	}
 
 	// print initial status
-	printf("Starting download at ");
+	LogPrintf("Starting download at ");
 	if(duration > 0) {
 		percent = ((double)timestamp) / (duration*1000.0)*100.0;
                 percent = round(percent*10.0)/10.0;
-                printf("%.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
+                LogPrintf("%.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
         } else {
-                printf("%.3f KB\n", (double)size/1024.0);
+                LogPrintf("%.3f KB\n", (double)size/1024.0);
         }
+
+	// write FLV header if not resuming
+	if(!bResume) {
+		nRead = WriteHeader(&buffer, bufferSize);
+		if(nRead > 0) {
+			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
+				Log(LOGERROR, "%s: Failed writing FLV header, exiting!", __FUNCTION__);
+				nStatus=RD_FAILED;
+				goto clean;
+			}
+			size += nRead;
+		} else {
+			Log(LOGERROR, "Couldn't obtain FLV header, exiting!");
+			nStatus=RD_FAILED;
+			goto clean;
+		}
+	}
 
 	do
 	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bNoHeader, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
-		//printf("nRead: %d\n", nRead);
+		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {
-			fwrite(buffer, sizeof(unsigned char), nRead, file);
+			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
+				Log(LOGERROR, "%s: Failed writing, exiting!", __FUNCTION__);
+                                nStatus=RD_FAILED;
+                                goto clean;
+                        }
 			size += nRead;
 	
-			//printf("write %dbytes (%.1f KB)\n", nRead, nRead/1024.0);
+			//LogPrintf("write %dbytes (%.1f KB)\n", nRead, nRead/1024.0);
 			if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
 				duration = rtmp->GetDuration();
 
 			if(duration > 0) {
 				// make sure we claim to have enough buffer time!
-				if(bufferTime < (duration*1000.0)) {
+				if(!bOverrideBufferTime && bufferTime < (duration*1000.0)) {
 					bufferTime = (uint32_t)(duration*1000.0)+5000; // extra 5sec to make sure we've got enough
 					
 					Log(LOGDEBUG, "Detected that buffer time is less than duration, resetting to: %dms", bufferTime);
@@ -906,9 +1055,9 @@ start:
 				}
 				percent = ((double)timestamp) / (duration*1000.0)*100.0;
 				percent = round(percent*10.0)/10.0;
-				printf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
+				LogPrintf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
 			} else {
-				printf("\r%.3f KB", (double)size/1024.0);
+				LogPrintf("\r%.3f KB", (double)size/1024.0);
 			}
 		}
 		#ifdef _DEBUG
@@ -917,27 +1066,27 @@ start:
 
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 
-	if(nRead == -2) {
-		printf("Couldn't continue FLV file!\n\n");
+	if(bResume && nRead == -2) {
+		LogPrintf("Couldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
 		nStatus = RD_FAILED;
 		goto clean;
 	}
 
-	// finalize header by writing the correct dataType
-	if(!bResume) {
+	// finalize header by writing the correct dataType (video, audio, video+audio)
+	if(!bResume && dataType != 0x5 && !bStdoutMode) {
 		//Log(LOGDEBUG, "Writing data type: %02X", dataType);
 		fseek(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
 	if((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1)) {
-		Log(LOGWARNING, "Download may be incomplete, try --resume!");
+		Log(LOGWARNING, "Download may be incomplete (downloaded about %.1f%%), try --resume!", percent);
 		nStatus = RD_INCOMPLETE;
 	}
 
 clean:
-	printf("Closing connection... ");
+	LogPrintf("Closing connection... ");
 	rtmp->Close();
-	printf("done!\n\n");
+	LogPrintf("done!\n\n");
 
 	if(file != 0)
 		fclose(file);
@@ -947,6 +1096,8 @@ clean:
 #ifdef _DEBUG
 	if(netstackdump != 0)
 		fclose(netstackdump);
+	if(netstackdump_read != 0)
+                fclose(netstackdump_read);	
 #endif
 	return nStatus;
 }

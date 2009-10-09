@@ -1,6 +1,28 @@
 RTMPDump
 Copyright 2008-2009 Andrej Stepanchuk; Distributed under the GPL v2
 
+27 Apr 2009, v1.5
+
+- RTMPE support (tested on Adobe 3.0.2,3.0.3,3.5.1, Wowza)
+
+- SWFVerification (tested on Adobe 3.0.2,3.0.3,3.5.1)
+
+- added AMF3 parsing support (experimental feauture, only some primitives, no references)
+
+- added -o - option which allows the stream to be dumped to stdout
+(debug/error messages go to stderr)
+
+- added --live option to enable download of live streams
+
+- added support for (Free)BSD and Mac (untested, so might need more fixing,
+especially for PPC/sparc64)
+
+- fixed a bug in url parsing
+
+- added a useful application: streams, it will start a streaming server and
+using a request like http://localhost/?r=rtmp://.... you can restream the
+content to your player over http
+
 11 Mar 2009, v1.4
 
 - fixed resume bug: when the server switches between audio/video packets and FLV
@@ -18,10 +40,6 @@ circumstances. The best way is to supply all prameters using the override
 options like --play, --app, etc.
 
 - fixed stream ids (from XBMC tree)
-
-04 Feb 2009, v1.3d
-
-- fixed missing terminating character in url parsing
 
 19 Jan 2009, v1.3b
 

@@ -1,21 +1,19 @@
-CC=gcc
-CXX=g++
-LD=ld
+CC=mingw32-gcc
+CXX=mingw32-g++
+LD=mingw32-ld
 
 CFLAGS=-Wall
-CXXFLAGS=-Wall
-LDFLAGS=-Wall
+
+CXXFLAGS=-Wall -I openssl-0.9.8k/include/
+LDFLAGS=-Wall -L openssl-0.9.8k/win32libs/lib/
 
 all: rtmpdump
 
 clean:
 	rm -f *.o
 
-streams: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o streams.o parseurl.o dh.o handshake.o
-	$(CXX) $(LDFLAGS) $^ -o $@_x86 -lpthread -lssl -lcrypto
-
 rtmpdump: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o rtmpdump.o parseurl.o dh.o handshake.o
-	$(CXX) $(LDFLAGS) $^ -o $@_x86 -lssl -lcrypto
+	$(CXX) $(LDFLAGS) $^ -o $@_win32.exe -lws2_32 -lwinmm -lcrypto -lgdi32
 
 bytes.o: bytes.cpp bytes.h Makefile
 log.o: log.cpp log.h Makefile

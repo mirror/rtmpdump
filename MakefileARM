@@ -1,10 +1,13 @@
-CC=gcc
-CXX=g++
-LD=ld
+CC=arm-linux-gcc
+CXX=arm-linux-g++
+LD=arm-linux-ld
 
 CFLAGS=-Wall
 CXXFLAGS=-Wall
 LDFLAGS=-Wall
+
+CXXFLAGS=-I openssl-0.9.8k/include/
+LDFLAGS=-L openssl-0.9.8k/armlibs/lib/
 
 all: rtmpdump
 
@@ -12,10 +15,10 @@ clean:
 	rm -f *.o
 
 streams: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o streams.o parseurl.o dh.o handshake.o
-	$(CXX) $(LDFLAGS) $^ -o $@_x86 -lpthread -lssl -lcrypto
+	$(CXX) $(LDFLAGS) $(ARMFLAGS) $^ -o $@_arm -lpthread -lcrypto
 
 rtmpdump: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o rtmpdump.o parseurl.o dh.o handshake.o
-	$(CXX) $(LDFLAGS) $^ -o $@_x86 -lssl -lcrypto
+	$(CXX) $(LDFLAGS) $(ARMFLAGS) $^ -o $@_arm -lcrypto
 
 bytes.o: bytes.cpp bytes.h Makefile
 log.o: log.cpp log.h Makefile

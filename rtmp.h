@@ -26,13 +26,21 @@
 //#include <vector>
 
 #ifdef WIN32
+#include <winsock.h>
 #else
 //#include <sys/types.h>
-//#include <sys/socket.h>
+#include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 //#include <unistd.h>
-//#include <netinet/in.h>
+#include <netinet/in.h>
+#include <errno.h>
+#endif
+
+#include "log.h"
+
+#ifdef CRYPTO
+#include "dh.h"
 #endif
 
 #include "AMFObject.h"
@@ -45,6 +53,18 @@
 #define RTMP_PROTOCOL_RTMPE     3 // not yet supported
 #define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
 #define RTMP_PROTOCOL_RTMFP     5 // not yet supported
+
+extern char RTMPProtocolStringsLower[][7];
+
+int32_t GetTime();
+
+inline int GetSockError() {
+#ifdef WIN32
+        return WSAGetLastError();
+#else
+        return errno;
+#endif
+}
 
 namespace RTMP_LIB
 {
@@ -61,9 +81,23 @@ typedef struct
         char *pageUrl;
         char *app;
         char *auth;
+	char *SWFHash;
+	uint32_t SWFSize;
 	char *flashVer;
 
 	double seekTime;
+	bool bLiveStream;
+
+	long int timeout; // number of seconds before connection times out
+	
+	#ifdef CRYPTO
+	DH *dh; // for encryption
+	RC4_KEY *rc4keyIn;
+	RC4_KEY *rc4keyOut;
+
+	//char SWFHashHMAC[32];
+	char SWFVerificationResponse[42];
+	#endif	
 } LNK;
 
 class CRTMP
@@ -85,9 +119,13 @@ class CRTMP
 	char *swfUrl, 
 	char *pageUrl, 
 	char *app, 
-	char *auth, 
+	char *auth,
+	char *swfSHA256Hash,
+	uint32_t swfSize,
 	char *flashVer, 
-      	double dTime);
+      	double dTime,
+	bool bLiveStream,
+	long int timeout=300);
 
       bool IsConnected(); 
       double GetDuration();
@@ -113,7 +151,7 @@ class CRTMP
       static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
 
     protected:
-      bool HandShake();
+      bool HandShake(bool FP9HandShake=true);
       bool Connect();
 
       bool SendConnectPacket();
@@ -128,7 +166,7 @@ class CRTMP
       bool SendSeek(double dTime);
       bool SendBytesReceived();
 
-      void HandleInvoke(const RTMPPacket &packet);
+      void HandleInvoke(const char *body, unsigned int nBodySize);
       void HandleMetadata(char *body, unsigned int len);
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);

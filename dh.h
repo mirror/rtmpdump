@@ -1,5 +1,5 @@
-/*  RTMP Dump
- *  Copyright (C) 2008-2009 Andrej Stepanchuk
+/*  RTMPDump - Diffie-Hellmann Key Exchange
+ *  Copyright (C) 2009 Andrej Stepanchuk
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -18,28 +18,20 @@
  *
  */
 
-#ifndef __LOG_H__
-#define __LOG_H__
+#include <openssl/bn.h>
+#include <openssl/dh.h>
 
-#include <stdio.h>
+#include <openssl/sha.h>
+#include <openssl/hmac.h>
+#include <openssl/rc4.h>
 
-//#define _DEBUG
-#define CRYPTO
+#include "bytes.h"
 
-#ifdef _DEBUG
-#undef NODEBUG
-#endif
-
-#define LOGDEBUG        0
-#define LOGERROR        1
-#define LOGWARNING	2
-#define LOGINFO		3
-
-void LogSetOutput(FILE *file);
-void LogPrintf(const char *format, ...);
-void Log(int level, const char *format, ...);
-void LogHex(const char *data, unsigned long len);
-void LogHexString(const char *data, unsigned long len);
-
-#endif
+bool isValidPublicKey(BIGNUM *y, BIGNUM *p, BIGNUM *q);
+DH* DHInit(int nKeyBits);
+bool DHGenerateKey(DH *dh);
+bool DHGetPublicKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen);
+bool DHGetPrivateKey(DH *dh, uint8_t *privkey, size_t nPrivkeyLen);
+int DHComputeSharedSecretKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen, uint8_t *secret);
+void DHFree(DH *dh);
 

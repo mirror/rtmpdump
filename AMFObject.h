@@ -37,6 +37,7 @@ namespace RTMP_LIB
       virtual ~AMFObject();
 
       int Encode(char *pBuffer, int nSize) const;
+      int AMF3Decode(const char * pBuffer, int nSize, bool bDecodeName=false);
       int Decode(const char *pBuffer, int nSize, bool bDecodeName=false);
       int DecodeArray(const char * pBuffer, int nSize, int nArrayLen, bool bDecodeName=false);
 
@@ -65,6 +66,7 @@ namespace RTMP_LIB
       virtual ~AMFObjectProperty();
 
       const std::string &GetPropName() const;
+      void SetPropName(const std::string strName);
 
       AMFDataType GetType() const;
 
@@ -76,6 +78,7 @@ namespace RTMP_LIB
       const AMFObject &GetObject() const;
 
       int Encode(char *pBuffer, int nSize) const;
+      int AMF3Decode(const char * pBuffer, int nSize, bool bDecodeName=false);
       int Decode(const char *pBuffer, int nSize, bool bDecodeName);
 
       void Reset();
@@ -92,6 +95,26 @@ namespace RTMP_LIB
       std::string m_strVal;
   };
 
+  class AMF3ClassDefinition
+  {
+    public:
+      AMF3ClassDefinition(const std::string &strClassName, bool bExternalizable, bool bDynamic);
+      virtual ~AMF3ClassDefinition();
+
+      void AddProperty(const std::string &strPropertyName);
+      const std::string &GetProperty(size_t nIndex) const;
+
+      int GetMemberCount() const;
+
+      bool isExternalizable() { return m_bExternalizable; }
+      bool isDynamic() { return m_bDynamic; }
+    protected:
+      std::string m_strClassName;
+      bool	  m_bExternalizable;
+      bool 	  m_bDynamic;
+
+      std::vector<std::string> m_properties;
+  };
 };
 
 #endif

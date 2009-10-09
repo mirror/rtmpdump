@@ -36,19 +36,23 @@
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.5"
+#define RTMPDUMP_VERSION	"v1.5a"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
 #define RD_INCOMPLETE		2
 
-inline void InitSockets() {
+// starts sockets
+bool InitSockets() 
+{
 #ifdef WIN32
         WORD version;
         WSADATA wsaData;
 
         version = MAKEWORD(1,1);
-        WSAStartup(version, &wsaData);
+        return (WSAStartup(version, &wsaData)==0);
+#else
+	return true;
 #endif
 }
 
@@ -587,32 +591,26 @@ int main(int argc, char **argv)
 			{
 				rtmpurl = optarg;
 
-				/*if(!IsUrlValid(optarg)) {
-					Log(LOGWARNING, "The specified url (%s) is invalid!", optarg);
-				} 
-				else 
-				{*/
-					char *parsedHost = 0;
-					unsigned int parsedPort = 0;
-					char *parsedPlaypath = 0;
-					char *parsedApp = 0;
-					int parsedProtocol = RTMP_PROTOCOL_UNDEFINED;
+				char *parsedHost = 0;
+				unsigned int parsedPort = 0;
+				char *parsedPlaypath = 0;
+				char *parsedApp = 0;
+				int parsedProtocol = RTMP_PROTOCOL_UNDEFINED;
 
-					if(!ParseUrl(rtmpurl, &parsedProtocol, &parsedHost, &parsedPort, &parsedPlaypath, &parsedApp)) {
-						Log(LOGWARNING, "Couldn't parse the specified url (%s)!", optarg);
-					} else {
-						if(hostname == 0)
-							hostname = parsedHost;
-						if(port == -1)
-							port = parsedPort;
-						if(playpath == 0)
-							playpath = parsedPlaypath;
-						if(protocol == RTMP_PROTOCOL_UNDEFINED)
-							protocol = parsedProtocol;
-						if(app == 0)
-							app = parsedApp;
-					}
-				//}
+				if(!ParseUrl(rtmpurl, &parsedProtocol, &parsedHost, &parsedPort, &parsedPlaypath, &parsedApp)) {
+					Log(LOGWARNING, "Couldn't parse the specified url (%s)!", optarg);
+				} else {
+					if(hostname == 0)
+						hostname = parsedHost;
+					if(port == -1)
+						port = parsedPort;
+					if(playpath == 0)
+						playpath = parsedPlaypath;
+					if(protocol == RTMP_PROTOCOL_UNDEFINED)
+						protocol = parsedProtocol;
+					if(app == 0)
+						app = parsedApp;
+				}
 				break;
 			}
 			case 's':
@@ -699,16 +697,27 @@ int main(int argc, char **argv)
 	if(flashVer == 0)
 		flashVer = DEFAULT_FLASH_VER;
 
-	if(tcUrl == 0 && app != 0) {
-		//if(rtmpurl != 0)
-		//	tcUrl = rtmpurl;
-		//else {
-			char str[512]={0};
-			snprintf(str, 511, "%s://%s:%d/%s", RTMPProtocolStringsLower[protocol], inet_ntoa(*(struct in_addr*)gethostbyname(hostname)->h_addr), port, app);
-			tcUrl = (char *)malloc(strlen(str)+1);
-			strcpy(tcUrl, str);
-		//}
+	if(!InitSockets()) {
+		Log(LOGERROR, "Couldn't load sockets support on your platform, exiting!");
+		return RD_FAILED;
 	}
+
+	if(tcUrl == 0 && app != 0) {
+		char str[512]={0};
+
+		/*
+		struct hostent *h = gethostbyname(hostname);
+		if(h == NULL || h->h_addr == NULL) {
+			Log(LOGERROR, "DNS name resolution failed, exiting");
+			return RD_FAILED;
+		}
+		hostip = inet_ntoa(*(struct in_addr*)h->h_addr)
+		//*/
+		snprintf(str, 511, "%s://%s:%d/%s", RTMPProtocolStringsLower[protocol], hostname, port, app);
+		tcUrl = (char *)malloc(strlen(str)+1);
+		strcpy(tcUrl, str);
+	}
+
 
 	int bufferSize = 1024*1024;
 	char *buffer = (char *)malloc(bufferSize);
@@ -974,8 +983,6 @@ start:
 	#endif
 
 	LogPrintf("Connecting ...\n");
-	
-	InitSockets();
 
 	//{ // here we decrease the seek time by 10ms to make sure the server starts with the next keyframe
 	//double dFindSeek = dSeek;

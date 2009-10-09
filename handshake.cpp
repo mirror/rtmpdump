@@ -210,7 +210,7 @@ unsigned int GetDigestOffset1(char *handshake, unsigned int len)
 
 void HMACsha256(const char *message, size_t messageLen, const char *key, size_t keylen, char *digest)
 {
-	size_t digestLen;
+	unsigned int digestLen;
 
 	HMAC_CTX ctx;
         HMAC_CTX_init(&ctx);

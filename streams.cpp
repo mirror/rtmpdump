@@ -584,7 +584,7 @@ void processTCPrequest
 
         if(req.tcUrl == 0 && req.app != 0) {
                 char str[512]={0};
-                snprintf(str, 511, "%s://%s/%s", "rtmp", req.hostname, req.app);
+                snprintf(str, 511, "%s://%s/%s", RTMPProtocolStringsLower[req.protocol], req.hostname, req.app);
                 req.tcUrl = (char *)malloc(strlen(str)+1);
                 strcpy(req.tcUrl, str);
         }

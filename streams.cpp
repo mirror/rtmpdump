@@ -38,7 +38,7 @@
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_STREAMS_VERSION	"v1.1"
+#define RTMPDUMP_STREAMS_VERSION	"v1.2"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -265,8 +265,7 @@ int WriteStream(
 			return 0;
 		}
 #ifdef _DEBUG
-		debugTS += packet.m_nInfoField1;
-		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, sent TS: %d ms", packet.m_packetType, nPacketLen, debugTS, packet.m_nInfoField1);
+		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms", packet.m_packetType, nPacketLen, packet.m_nTimeStamp);
 		if(packet.m_packetType == 0x09)
 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
 #endif
@@ -292,10 +291,9 @@ int WriteStream(
 			// set data type
 			//*dataType |= (((packet.m_packetType == 0x08)<<2)|(packet.m_packetType == 0x09));
 
-			(*nTimeStamp) += packet.m_nInfoField1;
+			(*nTimeStamp) = packet.m_nTimeStamp;
 			prevTagSize = 11 + nPacketLen;
 
-			//Log(LOGDEBUG, "%02X: Added TS: %d ms, TS: %d", packet.m_packetType, packet.m_nInfoField1, *nTimeStamp);
 			*ptr = packet.m_packetType; ptr++;
 			ptr += CRTMP::EncodeInt24(ptr, nPacketLen);
 			ptr += CRTMP::EncodeInt24(ptr, *nTimeStamp);
@@ -599,12 +597,6 @@ void processTCPrequest
 	// send the packets
 	buffer = (char *)calloc(PACKET_SIZE,1);
 
-	// set timestamp to correct position
-	#ifdef _DEBUG
-        debugTS = dSeek;
-        #endif
-
-        req.nTimeStamp = dSeek; // set offset if we continue        
         if(dSeek != 0) {
                 LogPrintf("Continuing at TS: %d ms\n", req.nTimeStamp);
         }
@@ -676,7 +668,7 @@ void processTCPrequest
                                 	duration = rtmp->GetDuration();
 
                         	if(duration > 0) {
-                                	percent = ((double)req.nTimeStamp) / (duration*1000.0)*100.0;
+                                	percent = ((double)(dSeek+req.nTimeStamp)) / (duration*1000.0)*100.0;
                                 	percent = round(percent*10.0)/10.0;
                                 	LogPrintf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
                         	} else {

@@ -58,10 +58,11 @@ namespace RTMP_LIB
       BYTE	m_packetType;
       BYTE	m_nChannel;
       int32_t	m_nInfoField1; // 3 first bytes
-      int32_t	m_nInfoField2; // last 4 bytes in a long header
+      int32_t	m_nInfoField2; // last 4 bytes in a long header, absolute timestamp for long headers, relative timestamp for short headers 
+      bool      m_hasAbsTimestamp; // timestamp absolute or relative?
+      uint32_t  m_nTimeStamp; // absolute timestamp
       uint32_t	m_nBodySize;
       uint32_t	m_nBytesRead;
-      uint32_t	m_nInternalTimestamp;
       char 	*m_body;
   };
 };

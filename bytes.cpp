@@ -58,7 +58,9 @@ double ReadNumber(const char *data)
 {
 #if __FLOAT_WORD_ORDER == __BYTE_ORDER
 #if __BYTE_ORDER == __BIG_ENDIAN
-	return *((double *)data);
+	double dVal;
+	memcpy(&dVal, data, 8);
+	return dVal;
 #elif __BYTE_ORDER == __LITTLE_ENDIAN
 	uint64_t in  = *((uint64_t*)data);
 	uint64_t res = __bswap_64(in);

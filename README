@@ -1,4 +1,4 @@
-RTMP Dumper v1.5a
+RTMP Dump v1.6
 (C) 2009 Andrej Stepanchuk
 License: GPLv2
 
@@ -17,17 +17,16 @@ To download an rtmp stream use
 
   $ ./get_iplayer --raw --force --get 1 --vmode flashhigh --rtmp --rtmpdump "./rtmpdump"
 
-rtmpdump still supports hulu (only the non RTMPE streams for now) if you can invoke it with
-a correct rtmp url.
+rtmpdump still supports hulu if you can invoke it with a correct rtmp url.
 
-SWFVerification
----------------
+SWF Verification
+----------------
 
 Download the swf player you want to use for SWFVerification, unzip it using
 
  $ flasm -x file.swf
 
-It will show the decompressed filesize, use it for --swfsize Filesize.
+It will show the decompressed filesize, use it for --swfsize
 
 Now generate the hash
 

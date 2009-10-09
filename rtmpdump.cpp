@@ -36,7 +36,7 @@
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.5a"
+#define RTMPDUMP_VERSION	"v1.6"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -62,7 +62,7 @@ inline void CleanupSockets() {
 #endif
 }
 
-uint32_t nTimeStamp = 0;
+//uint32_t nTimeStamp = 0;
 
 #ifdef _DEBUG
 uint32_t debugTS = 0;
@@ -106,6 +106,7 @@ int WriteStream(
 		unsigned int len, 		// length of buffer if preallocated
 		uint32_t *tsm, 			// pointer to timestamp, will contain timestamp of last video packet returned
 		bool bResume, 		        // resuming mode, will not write FLV header and compare metaHeader and first kexframe
+		uint32_t nResumeTS,		// resume keyframe timestamp
 		char *metaHeader, 		// pointer to meta header (if bResume == TRUE)
 		uint32_t nMetaHeaderSize,	// length of meta header, if zero meta header check omitted (if bResume == TRUE)
 		char *initialFrame,		// pointer to initial keyframe (no FLV header or tagSize, raw data) (if bResume == TRUE)
@@ -142,14 +143,13 @@ int WriteStream(
 			return 0;
 		}
 #ifdef _DEBUG
-		debugTS += packet.m_nInfoField1;
-		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, sent TS: %d ms", packet.m_packetType, nPacketLen, debugTS, packet.m_nInfoField1);
+		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
 		if(packet.m_packetType == 0x09)
 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
 #endif
 
 		// check the header if we get one
-		if(bResume && packet.m_nInfoField1 == 0) {
+		if(bResume && packet.m_nTimeStamp == 0) {
 			if(nMetaHeaderSize > 0 && packet.m_packetType == 0x12) {
 			
 				RTMP_LIB::AMFObject metaObj;
@@ -187,7 +187,7 @@ int WriteStream(
 				// filter it out !!
 				//
 				if(packet.m_packetType == 0x16) {
-					// basically we have to find the keyframe with the correct TS being nTimeStamp
+					// basically we have to find the keyframe with the correct TS being nResumeTS
 					unsigned int pos=0;
 					uint32_t ts = 0;
 
@@ -202,7 +202,7 @@ int WriteStream(
 						#endif
 						// ok, is it a keyframe!!!: well doesn't work for audio!
 						if(packetBody[pos /*6928, test 0*/] == initialFrameType /* && (packetBody[11]&0xf0) == 0x10*/) {
-							if(ts == nTimeStamp) {
+							if(ts == nResumeTS) {
 								Log(LOGDEBUG, "Found keyframe with resume-keyframe timestamp!");
 								if(nInitialFrameSize != dataSize || memcmp(initialFrame, packetBody+pos+11, nInitialFrameSize) != 0) {
 									Log(LOGERROR, "FLV Stream: Keyframe doesn't match!");
@@ -221,13 +221,13 @@ int WriteStream(
 
 								goto stopKeyframeSearch;
 
-							} else if(nTimeStamp < ts) {
+							} else if(nResumeTS < ts) {
 								goto stopKeyframeSearch; // the timestamp ts will only increase with further packets, wait for seek
 							}
 						} 
                                 		pos += (11+dataSize+4);
                         		}
-					if(ts < nTimeStamp) {
+					if(ts < nResumeTS) {
 						Log(LOGERROR, "First packet does not contain keyframe, all timestamps are smaller than the keyframe timestamp, so probably the resume seek failed?");
 					}
 stopKeyframeSearch:
@@ -240,7 +240,7 @@ stopKeyframeSearch:
 			}
 		}
 		
-		if(bResume && packet.m_nInfoField1 > 0 && (bFoundFlvKeyframe || bFoundKeyframe)) {
+		if(bResume && packet.m_nTimeStamp > 0 && (bFoundFlvKeyframe || bFoundKeyframe)) {
 			// another problem is that the server can actually change from 09/08 video/audio packets to an FLV stream
 			// or vice versa and our keyframe check will prevent us from going along with the new stream if we resumed
 			//
@@ -273,7 +273,7 @@ stopKeyframeSearch:
 		// so don't mess around with multiple copies sent by the server to us! (if the keyframe is found at a later position
 		// there is only one copy and it will be ignored by the preceding if clause)
 		if(!bStopIgnoring && bResume && packet.m_packetType != 0x16) { // exclude type 0x16 (FLV) since it can conatin several FLV packets
-			if(packet.m_nInfoField1 == 0) {
+			if(packet.m_nTimeStamp == 0) {
 				return 0;
 			} else {
 				bStopIgnoring = true; // stop ignoring packets
@@ -294,6 +294,8 @@ stopKeyframeSearch:
 		}
 		char *ptr = *buf;
 
+		uint32_t nTimeStamp = 0; // use to return timestamp of last processed packet
+
 		// audio (0x08), video (0x09) or metadata (0x12) packets :
 		// construct 11 byte header then add rtmp packet's data
 		if(packet.m_packetType == 0x08 || packet.m_packetType == 0x09 || packet.m_packetType == 0x12)
@@ -301,11 +303,9 @@ stopKeyframeSearch:
 			// set data type
 			*dataType |= (((packet.m_packetType == 0x08)<<2)|(packet.m_packetType == 0x09));
 
-			nTimeStamp += packet.m_nInfoField1;
+			nTimeStamp = nResumeTS + packet.m_nTimeStamp;
 			prevTagSize = 11 + nPacketLen;
-			//nTimeStamp += packet.m_nInfoField1;
 
-			//Log(LOGDEBUG, "%02X: Added TS: %d ms, TS: %d", packet.m_packetType, packet.m_nInfoField1, nTimeStamp);
 			*ptr = packet.m_packetType;
 			ptr++;
 			ptr += CRTMP::EncodeInt24(ptr, nPacketLen);
@@ -997,14 +997,13 @@ start:
 	LogPrintf("Connected...\n\n");
 	//}
 	
-	#ifdef _DEBUG
+	/*#ifdef _DEBUG
 	debugTS = dSeek;
-	#endif
+	#endif*/
 
 	timestamp  = dSeek;
-	nTimeStamp = dSeek; // set offset if we continue	
 	if(dSeek != 0) {
-		LogPrintf("Continuing at TS: %d ms\n", nTimeStamp);
+		LogPrintf("Continuing at TS: %d ms\n", timestamp);
 	}
 
 	// print initial status
@@ -1036,7 +1035,7 @@ start:
 
 	do
 	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
 		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {

@@ -1029,10 +1029,13 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
 
   int nSize = packetSize[packet.m_headerType];
   
-//  Log(LOGDEBUG, "%s, reading RTMP packet chunk on channel %x, headersz %i", __FUNCTION__, packet.m_nChannel, nSize);
+  if (nSize == RTMP_LARGE_HEADER_SIZE) // if we get a full header the timestamp is absolute
+    packet.m_hasAbsTimestamp = true; 
 
-  if (nSize < RTMP_LARGE_HEADER_SIZE) // using values from the last message of this channel
+  if (nSize < RTMP_LARGE_HEADER_SIZE) { // using values from the last message of this channel
+    packet.FreePacketHeader(); // test whether this avoids memory leak
     packet = m_vecChannelsIn[packet.m_nChannel];
+  }
   
   nSize--;
 
@@ -1045,6 +1048,8 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
 
   if (nSize >= 3)
     packet.m_nInfoField1 = ReadInt24(header);
+
+  //Log(LOGDEBUG, "%s, reading RTMP packet chunk on channel %x, headersz %i, timestamp %i, abs timestamp %i", __FUNCTION__, packet.m_nChannel, nSize, packet.m_nInfoField1, packet.m_hasAbsTimestamp); 
 
   if (nSize >= 6)
   {
@@ -1084,10 +1089,19 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
 
   if (packet.IsReady())
   {
+    packet.m_nTimeStamp = packet.m_nInfoField1;
+    
+    // make packet's timestamp absolute 
+    if (!packet.m_hasAbsTimestamp) 
+      packet.m_nTimeStamp += m_channelTimestamp[packet.m_nChannel]; // timestamps seem to be always relative!! 
+      
+    m_channelTimestamp[packet.m_nChannel] = packet.m_nTimeStamp; 
+ 
     // reset the data from the stored packet. we keep the header since we may use it later if a new packet for this channel
     // arrives and requests to re-use some info (small packet header)
     m_vecChannelsIn[packet.m_nChannel].m_body = NULL;
     m_vecChannelsIn[packet.m_nChannel].m_nBytesRead = 0;
+    m_vecChannelsIn[packet.m_nChannel].m_hasAbsTimestamp = false; // can only be false if we reuse header
   }
   else
     packet.m_body = NULL; // so it wont be erased on "free"

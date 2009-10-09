@@ -28,11 +28,11 @@
 #ifdef WIN32
 #include <winsock.h>
 #else
-//#include <sys/types.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-//#include <unistd.h>
+#include <unistd.h>
 #include <netinet/in.h>
 #include <errno.h>
 #endif
@@ -207,6 +207,7 @@ class CRTMP
       int  m_nBufferSize;   // number of unprocessed bytes in buffer
       RTMPPacket m_vecChannelsIn[64];
       RTMPPacket m_vecChannelsOut[64];
+      int  m_channelTimestamp[64]; // abs timestamp of last packet
 
       double m_fDuration; // duration of stream in seconds
   };

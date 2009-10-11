@@ -1,0 +1,378 @@
+Index: AMFObject.h
+===================================================================
+--- AMFObject.h	(revision 4)
++++ AMFObject.h	(working copy)
+@@ -24,6 +24,7 @@
+ 
+ #include <string>
+ #include <vector>
++#include <stdint.h>
+ 
+ namespace RTMP_LIB
+ {
+Index: rtmpdump.cpp
+===================================================================
+--- rtmpdump.cpp	(revision 6)
++++ rtmpdump.cpp	(working copy)
+@@ -70,7 +70,11 @@
+ 
+ FILE *netstackdump = 0;
+ FILE *netstackdump_read = 0;
++#ifdef CRYPTO
++FILE *netstackdump_dec = 0;
++FILE *netstackdump_read_dec = 0;
+ #endif
++#endif
+ 
+ uint32_t nIgnoredFlvFrameCounter = 0;
+ uint32_t nIgnoredFrameCounter = 0;
+@@ -142,8 +146,31 @@
+ 			Log(LOGWARNING, "ignoring too small audio packet: size: %d", nPacketLen);
+ 			return 0;
+ 		}
++                if(packet.m_packetType == 0x12) { // && (nPacketLen == 24 || nPacketLen == 44)) {
++                        //packet.Dump();
++                        //LogHex(packetBody, nPacketLen);
++                        RTMP_LIB::AMFObject obj;
++                        /*int nRes =*/ obj.Decode(packetBody, nPacketLen);
++                        std::string method = obj.GetProperty(0).GetString();
++                        if (method == "onStatus")
++                        {
++                            Log(LOGWARNING, "ignoring onStatus(%s) packet", obj.GetProperty(1).GetObject().GetProperty("code").GetString().c_str());
++                            return 0;
++                        }
++                        else if (method == "|RtmpSampleAccess")
++                        {
++                            Log(LOGWARNING, "ignoring |RtmpSampleAccess packet");
++                            return 0;
++                        }
++                        /*if (strncmp(packetBody+2, "onStatus", 8) == 0)
++                        {
++                            Log(LOGDEBUG, "SKIP IT SKIP IT SKIP IT!!!!!!");
++                        }*/
++                        //Log(LOGWARNING, "pkt to SKIP: size: %d", nPacketLen);
++                        //return 0;
++                }
+ #ifdef _DEBUG
+-		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
++		Log(LOGDEBUG, "type: %02X, ch: %d, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, packet.m_nChannel, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
+ 		if(packet.m_packetType == 0x09)
+ 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
+ #endif
+@@ -980,7 +1007,11 @@
+ 	#ifdef _DEBUG
+ 	netstackdump = fopen("netstackdump", "wb");
+ 	netstackdump_read = fopen("netstackdump_read", "wb");
++	#ifdef CRYPTO
++	netstackdump_dec = fopen("netstackdump_dec", "wb");
++	netstackdump_read_dec = fopen("netstackdump_read_dec", "wb");
+ 	#endif
++	#endif
+ 
+ 	LogPrintf("Connecting ...\n");
+ 
+@@ -1103,8 +1134,14 @@
+ 	if(netstackdump != 0)
+ 		fclose(netstackdump);
+ 	if(netstackdump_read != 0)
+-                fclose(netstackdump_read);	
++                fclose(netstackdump_read);
++#ifdef CRYPTO
++	if(netstackdump_dec != 0)
++		fclose(netstackdump_dec);
++	if(netstackdump_read_dec != 0)
++                fclose(netstackdump_read_dec);
+ #endif
++#endif
+ 	return nStatus;
+ }
+ 
+Index: rtmppacket.h
+===================================================================
+--- rtmppacket.h	(revision 6)
++++ rtmppacket.h	(working copy)
+@@ -23,6 +23,7 @@
+  */
+ 
+ #include <string>
++#include <stdint.h>
+ 
+ #define RTMP_PACKET_TYPE_AUDIO 0x08
+ #define RTMP_PACKET_TYPE_VIDEO 0x09
+@@ -56,7 +57,7 @@
+ 
+       BYTE	m_headerType;
+       BYTE	m_packetType;
+-      BYTE	m_nChannel;
++      uint32_t	m_nChannel; // used to be BYTE
+       int32_t	m_nInfoField1; // 3 first bytes
+       int32_t	m_nInfoField2; // last 4 bytes in a long header, absolute timestamp for long headers, relative timestamp for short headers 
+       bool      m_hasAbsTimestamp; // timestamp absolute or relative?
+Index: rtmp.cpp
+===================================================================
+--- rtmp.cpp	(revision 6)
++++ rtmp.cpp	(working copy)
+@@ -388,7 +388,11 @@
+ #ifdef _DEBUG
+ extern FILE *netstackdump;
+ extern FILE *netstackdump_read;
++#ifdef CRYPTO
++extern FILE *netstackdump_dec;
++extern FILE *netstackdump_read_dec;
+ #endif
++#endif
+ 
+ int CRTMP::ReadN(char *buffer, int n)
+ {
+@@ -450,6 +454,9 @@
+     if(Link.rc4keyIn) {
+     	RC4(Link.rc4keyIn, nBytes, (uint8_t*)ptr, (uint8_t*)ptr);
+     }
++#ifdef _DEBUG
++        fwrite(ptr, 1, nBytes, netstackdump_read_dec);
++#endif
+     #endif
+ 
+     n -= nBytes;
+@@ -466,6 +473,9 @@
+   char *encrypted = 0;
+  
+   #ifdef CRYPTO
++#ifdef _DEBUG
++	fwrite(ptr, 1, n, netstackdump_dec);
++#endif
+   if(Link.rc4keyOut) {
+     ptr = encrypted = (char *)malloc(n);
+     RC4(Link.rc4keyOut, n, (uint8_t*)buffer, (uint8_t*)ptr);
+@@ -990,7 +1000,7 @@
+ 
+ void CRTMP::HandlePing(const RTMPPacket &packet)
+ {
+-  short nType = -1;
++  uint16_t nType = -1;
+   if (packet.m_body && packet.m_nBodySize >= 2)
+     nType = ReadInt16(packet.m_body);
+   Log(LOGDEBUG, "%s, received ping. type: %d, len: %d", __FUNCTION__, nType, packet.m_nBodySize);
+@@ -1026,6 +1036,25 @@
+ 
+   packet.m_headerType = (type & 0xc0) >> 6;
+   packet.m_nChannel = (type & 0x3f);
++  if (packet.m_nChannel == 0 || packet.m_nChannel == 1)
++  {
++    if (ReadN(&type,1) != 1)
++    {
++      Log(LOGERROR, "%s, failed to read 2nd RTMP packet header byte", __FUNCTION__);
++      return false;
++    }
++    packet.m_nChannel = 0x40 + type;
++    if (packet.m_nChannel == 1)
++    {
++      if (ReadN(&type,1) != 1)
++      {
++        Log(LOGERROR, "%s, failed to read 3rd RTMP packet header byte", __FUNCTION__);
++        return false;
++      }
++      packet.m_nChannel += type << 8; // WARNING untested!
++    }
++  }
++  //Log(LOGDEBUG, "This channel: %lu", packet.m_nChannel);
+ 
+   int nSize = packetSize[packet.m_headerType];
+   
+@@ -1109,7 +1138,7 @@
+   return true;
+ }
+ 
+-short  CRTMP::ReadInt16(const char *data)
++int16_t  CRTMP::ReadInt16(const char *data)
+ {
+   short val;
+   memcpy(&val,data,sizeof(short));
+@@ -1136,18 +1165,35 @@
+ std::string CRTMP::ReadString(const char *data)
+ {
+   std::string strRes;
+-  short len = ReadInt16(data);
++  uint16_t len = ReadInt16(data);
++  //Log(LOGDEBUG, "%s: Reading string of length: %d", __FUNCTION__, len);
+   if (len > 0)
+   {
+     char *pStr = new char[len+1]; 
+     memset(pStr, 0, len+1);
+-    memcpy(pStr, data + sizeof(short), len);
++    memcpy(pStr, data + sizeof(uint16_t), len);
+     strRes = pStr;
+     delete [] pStr;
+   }
+   return strRes;
+ }
+ 
++std::string CRTMP::ReadLongString(const char *data)
++{
++  std::string strRes;
++  uint32_t len = ReadInt32(data);
++  Log(LOGDEBUG, "%s: reading %d bytes", __FUNCTION__, len);
++  if (len > 0)
++  {
++    char *pStr = new char[len+1]; 
++    memset(pStr, 0, len+1);
++    memcpy(pStr, data + sizeof(uint32_t), len);
++    strRes = pStr;
++    delete [] pStr;
++  }
++  return strRes;
++}
++
+ bool CRTMP::ReadBool(const char *data)
+ {
+   return *data == 0x01;
+@@ -1347,7 +1393,29 @@
+ 
+   int nSize = packetSize[packet.m_headerType];
+   char header[RTMP_LARGE_HEADER_SIZE] = { 0 };
+-  header[0] = (char)((packet.m_headerType << 6) | packet.m_nChannel);
++  //header[0] = (char)((packet.m_headerType << 6) | packet.m_nChannel);
++  if (packet.m_nChannel < 0x40)
++  {
++    header[0] = (char)((packet.m_headerType << 6) | packet.m_nChannel);
++  }
++  // WARNING Untested:
++  else if (packet.m_nChannel >= 0x40 && packet.m_nChannel < 0x140)
++  {
++    char chan = ((packet.m_headerType << 6) | 0);
++    if (!WriteN(&chan, 1))
++      return false;
++    header[0] = (char)((packet.m_nChannel - 0x40) & 0xff);
++  }
++  else if (packet.m_nChannel >= 0x140 && packet.m_nChannel < 0x10040)
++  {
++    char chan = ((packet.m_headerType << 6) | 1);
++    if (!WriteN(&chan, 1))
++      return false;
++    chan = (packet.m_nChannel - 0x40) & 0xff;
++    if (!WriteN(&chan, 1))
++      return false;
++    header[0] = (char)(((packet.m_nChannel - 0x40) >> 8) & 0xff);
++  }
+   if (nSize > 1)
+     EncodeInt24(header+1, packet.m_nInfoField1);
+   
+@@ -1383,13 +1451,38 @@
+ 
+     if (nSize > 0)
+     {
+-      char sep = (0xc0 | packet.m_nChannel);
+-      if (!WriteN(&sep, 1))
+-        return false;  
++      if (packet.m_nChannel < 0x40)
++      {
++        char sep = (0xc0 | packet.m_nChannel);
++        if (!WriteN(&sep, 1))
++          return false;
++      }
++      // WARNING Untested:
++      else if (packet.m_nChannel >= 0x40 && packet.m_nChannel < 0x140)
++      {
++        char sep = (0xc0 | 0);
++        if (!WriteN(&sep, 1))
++          return false;
++        sep = (packet.m_nChannel - 0x40) & 0xff;
++        if (!WriteN(&sep, 1))
++          return false;
++      }
++      else if (packet.m_nChannel >= 0x140 && packet.m_nChannel < 0x10040)
++      {
++        char sep = (0xc0 | 1);
++        if (!WriteN(&sep, 1))
++          return false;
++        sep = (packet.m_nChannel - 0x40) & 0xff;
++        if (!WriteN(&sep, 1))
++          return false;
++        sep = ((packet.m_nChannel - 0x40) >> 8) & 0xff;
++        if (!WriteN(&sep, 1))
++          return false;
++      }
+     }
+   }
+ 
+-  if (packet.m_packetType == 0x14) // we invoked a remote method, keep it in call queue till result arrives
++  if (packet.m_packetType == 0x14 && ReadString(packet.m_body + 1) != "_result") // we invoked a remote method, keep it in call queue till result arrives, providing that we're not sending a result ourselves
+     m_methodCalls.push_back(ReadString(packet.m_body + 1));
+ 
+   m_vecChannelsOut[packet.m_nChannel] = packet;
+@@ -1408,7 +1501,8 @@
+   m_nBytesIn = 0;
+   m_nBytesInSent = 0;
+ 
+-  for (int i=0; i<64; i++)
++  //for (int i=0; i<64; i++)
++  for (int i=0; i<65600; i++)
+   {
+     m_vecChannelsIn[i].Reset();
+     m_vecChannelsIn[i].m_nChannel = i;
+Index: rtmp.h
+===================================================================
+--- rtmp.h	(revision 6)
++++ rtmp.h	(working copy)
+@@ -141,10 +141,11 @@
+       static int EncodeInt32(char *output, int nVal);
+       static int EncodeBoolean(char *output,bool bVal);
+ 
+-      static short ReadInt16(const char *data);
++      static int16_t ReadInt16(const char *data);
+       static int  ReadInt24(const char *data);
+       static int  ReadInt32(const char *data);
+       static std::string ReadString(const char *data);
++      static std::string ReadLongString(const char *data);
+       static bool ReadBool(const char *data);
+       static double ReadNumber(const char *data);
+ 
+@@ -205,9 +206,9 @@
+       char *m_pBuffer;      // data read from socket
+       char *m_pBufferStart; // pointer into m_pBuffer of next byte to process
+       int  m_nBufferSize;   // number of unprocessed bytes in buffer
+-      RTMPPacket m_vecChannelsIn[64];
+-      RTMPPacket m_vecChannelsOut[64];
+-      int  m_channelTimestamp[64]; // abs timestamp of last packet
++      RTMPPacket m_vecChannelsIn[65600];
++      RTMPPacket m_vecChannelsOut[65600];
++      int  m_channelTimestamp[65600]; // abs timestamp of last packet
+ 
+       double m_fDuration; // duration of stream in seconds
+   };
+Index: AMFObject.cpp
+===================================================================
+--- AMFObject.cpp	(revision 4)
++++ AMFObject.cpp	(working copy)
+@@ -383,7 +383,7 @@
+ 
+   if (bDecodeName)
+   {
+-    unsigned short nNameSize = RTMP_LIB::CRTMP::ReadInt16(pBuffer);
++    uint16_t nNameSize = RTMP_LIB::CRTMP::ReadInt16(pBuffer);
+     if (nNameSize > nSize - 2) {
+       Log(LOGDEBUG,"%s: Name size out of range: namesize (%d) > len (%d) - 2", __FUNCTION__, nNameSize, nSize);
+       return -1;
+@@ -420,7 +420,7 @@
+       break;
+     case 0x02: // AMF_STRING:
+     {
+-      unsigned short nStringSize = RTMP_LIB::CRTMP::ReadInt16(pBuffer+1);
++      uint16_t nStringSize = RTMP_LIB::CRTMP::ReadInt16(pBuffer+1);
+       //Log(LOGDEBUG, "Read string, len: %d\n", nStringSize);
+       //LogHex(pBuffer, nSize);
+ 
+@@ -500,10 +500,11 @@
+     {
+     	Log(LOGWARNING, "AMF_LONG_STRING not tested!");
+ 	
+-    	unsigned int nStringSize = RTMP_LIB::CRTMP::ReadInt32(pBuffer+1);;
++    	unsigned int nStringSize = RTMP_LIB::CRTMP::ReadInt32(pBuffer+1);
++    	Log(LOGDEBUG, "nSize:[%d] nStringSize:[%d]", nSize, nStringSize);
+         if (nSize < (long)nStringSize + 4)
+           return -1;
+-        m_strVal = RTMP_LIB::CRTMP::ReadString(pBuffer+1);
++        m_strVal = RTMP_LIB::CRTMP::ReadLongString(pBuffer+1);
+         nSize -= (4 + nStringSize);
+         m_type = AMF_STRING;
+ 	break;

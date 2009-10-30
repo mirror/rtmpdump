@@ -91,7 +91,7 @@ void InitRC4Encryption
         HMAC_CTX_cleanup(&ctx);
 
 	Log(LOGDEBUG, "RC4 Out Key: ");
-	LogHex((char*)digest, 16);
+	LogHex(LOGDEBUG, (char*)digest, 16);
 
         RC4_set_key(*rc4keyOut, 16, digest);
 
@@ -102,7 +102,7 @@ void InitRC4Encryption
         HMAC_CTX_cleanup(&ctx);
 
 	Log(LOGDEBUG, "RC4 In Key: ");
-	LogHex((char*)digest, 16);
+	LogHex(LOGDEBUG, (char*)digest, 16);
         
 	RC4_set_key(*rc4keyIn, 16, digest);
 }
@@ -275,8 +275,15 @@ bool CRTMP::HandShake(bool FP9HandShake)
 	else
 		clientsig[0] = 0x03;
 
+#if 0
 	uint32_t uptime = htonl(GetTime());
 	memcpy(clientsig + 1, &uptime, 4);
+#else
+	clientsig[1] = 0;
+	clientsig[2] = 0;
+	clientsig[3] = 0;
+	clientsig[4] = 0;
+#endif
 
 	if(FP9HandShake) {
 		//* TODO RTMPE ;), its just RC4 with diffie-hellman
@@ -353,12 +360,12 @@ bool CRTMP::HandShake(bool FP9HandShake)
 		CalculateDigest(digestPosClient, clientsig+1, GenuineFPKey, 30, &clientsig[1+digestPosClient]);
 		
 		Log(LOGDEBUG, "%s: Initial client digest: ", __FUNCTION__);
-		LogHex((char *)clientsig+1+digestPosClient, SHA256_DIGEST_LENGTH);
+		LogHex(LOGDEBUG, (char *)clientsig+1+digestPosClient, SHA256_DIGEST_LENGTH);
 	}
 
 	#ifdef _DEBUG
 	Log(LOGDEBUG, "Clientsig: ");
-	LogHex(&clientsig[1], RTMP_SIG_SIZE);
+	LogHex(LOGDEBUG, &clientsig[1], RTMP_SIG_SIZE);
 	#endif
 
 	if(!WriteN(clientsig, RTMP_SIG_SIZE + 1))
@@ -387,7 +394,7 @@ bool CRTMP::HandShake(bool FP9HandShake)
 
 	#ifdef _DEBUG
 	Log(LOGDEBUG,"Server signature:");
-	LogHex(serversig, RTMP_SIG_SIZE);
+	LogHex(LOGDEBUG, serversig, RTMP_SIG_SIZE);
 	#endif
 
 	// we have to use this signature now to find the correct algorithms for getting the digest and DH positions
@@ -451,7 +458,7 @@ bool CRTMP::HandShake(bool FP9HandShake)
 		}
 
 		Log(LOGDEBUG, "%s: Secret key: ", __FUNCTION__);
-		LogHex((char *)secretKey, 128);
+		LogHex(LOGDEBUG, (char *)secretKey, 128);
 		
 		InitRC4Encryption(
 			secretKey, 
@@ -473,7 +480,7 @@ bool CRTMP::HandShake(bool FP9HandShake)
 
 	#ifdef _DEBUG
 	Log(LOGDEBUG, "%s: 2nd handshake: ", __FUNCTION__);
-	LogHex(resp, RTMP_SIG_SIZE);
+	LogHex(LOGDEBUG, resp, RTMP_SIG_SIZE);
 	#endif
 
 	if(FP9HandShake && resp[4] == 0 && resp[5] == 0 && resp[6] == 0 && resp[7] == 0) {
@@ -501,13 +508,13 @@ bool CRTMP::HandShake(bool FP9HandShake)
 
 		// show some information
 		Log(LOGDEBUG, "%s: Digest key: ", __FUNCTION__);
-		LogHex(digest, SHA256_DIGEST_LENGTH);
+		LogHex(LOGDEBUG, digest, SHA256_DIGEST_LENGTH);
 
 		Log(LOGDEBUG, "%s: Signature calculated:", __FUNCTION__);
-		LogHex(signature, SHA256_DIGEST_LENGTH);
+		LogHex(LOGDEBUG, signature, SHA256_DIGEST_LENGTH);
 
 		Log(LOGDEBUG, "%s: Server sent signature:", __FUNCTION__);
-		LogHex(&resp[RTMP_SIG_SIZE-SHA256_DIGEST_LENGTH], SHA256_DIGEST_LENGTH);
+		LogHex(LOGDEBUG, &resp[RTMP_SIG_SIZE-SHA256_DIGEST_LENGTH], SHA256_DIGEST_LENGTH);
 
 		if(memcmp(signature, &resp[RTMP_SIG_SIZE-SHA256_DIGEST_LENGTH], SHA256_DIGEST_LENGTH) != 0) {
 			Log(LOGWARNING, "%s: Server not genuine Adobe!", __FUNCTION__);
@@ -535,16 +542,16 @@ bool CRTMP::HandShake(bool FP9HandShake)
 
 		// some info output
 		Log(LOGDEBUG, "%s: Calculated digest key from secure key and server digest: ", __FUNCTION__);
-                LogHex(digestResp, SHA256_DIGEST_LENGTH);
+                LogHex(LOGDEBUG, digestResp, SHA256_DIGEST_LENGTH);
 
                 Log(LOGDEBUG, "%s: Client signature calculated:", __FUNCTION__);
-                LogHex(signatureResp, SHA256_DIGEST_LENGTH);
+                LogHex(LOGDEBUG, signatureResp, SHA256_DIGEST_LENGTH);
 
 		memcpy(&clientResp[RTMP_SIG_SIZE-SHA256_DIGEST_LENGTH], signatureResp, SHA256_DIGEST_LENGTH);
 
 		#ifdef _DEBUG
 		Log(LOGDEBUG, "%s: Sending final signed handshake response: ", __FUNCTION__);
-		LogHex(clientResp, RTMP_SIG_SIZE);
+		LogHex(LOGDEBUG, clientResp, RTMP_SIG_SIZE);
 		#endif
 
 		if(!WriteN(clientResp, RTMP_SIG_SIZE))

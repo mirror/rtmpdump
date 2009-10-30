@@ -24,6 +24,7 @@
 
 #include <string>
 #include <vector>
+#include <stdint.h>
 
 namespace RTMP_LIB
 {

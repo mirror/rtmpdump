@@ -21,6 +21,7 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "rtmppacket.h"
 #include "log.h"
@@ -52,10 +53,9 @@ void RTMPPacket::Reset()
 
 bool RTMPPacket::AllocPacket(int nSize)
 {
-  m_body = new char[nSize];
+  m_body = (char *)calloc(1, nSize);
   if (!m_body)
     return false;
-  memset(m_body,0,nSize);
   m_nBytesRead = 0;
   return true;
 }
@@ -69,7 +69,7 @@ void RTMPPacket::FreePacket()
 void RTMPPacket::FreePacketHeader()
 {
   if (m_body)
-    delete [] m_body;
+    free(m_body);
   m_body = NULL;
 }
 

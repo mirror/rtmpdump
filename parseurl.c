@@ -22,11 +22,18 @@
 #include <string.h>
 
 #include <assert.h>
+#include <ctype.h>
 
 #include "log.h"
 #include "parseurl.h"
 
-#include "rtmp.h"
+#define RTMP_PROTOCOL_UNDEFINED	-1
+#define RTMP_PROTOCOL_RTMP      0
+#define RTMP_PROTOCOL_RTMPT     1 // not yet supported
+#define RTMP_PROTOCOL_RTMPS     2 // not yet supported
+#define RTMP_PROTOCOL_RTMPE     3 // not yet supported
+#define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
+#define RTMP_PROTOCOL_RTMFP     5 // not yet supported
 
 char *str2lower(char *str, int len)
 {
@@ -94,7 +101,7 @@ int hex2bin(char *str, char **hex)
 	return ret;
 }
 
-bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app)
+int ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app)
 {
 	assert(url != 0 && protocol != 0 && host != 0 && port != 0 && playpath != 0 && app != 0);
 
@@ -112,7 +119,7 @@ bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **
 	if(p == 0) {
 		Log(LOGWARNING, "RTMP URL: No :// in url!");
 		free(lw);
-		return false;
+		return 0;
 	}
 
 	if(len == 4 && strncmp(lw, "rtmp", 4)==0)
@@ -143,7 +150,7 @@ parsehost:
 	// check for sudden death
 	if(*p==0) {
 		Log(LOGWARNING, "No hostname in URL!");		
-		return false;
+		return 0;
 	}
 
 	int iEnd   = strlen(p);
@@ -199,7 +206,7 @@ parsehost:
 
 	if(*p != '/') {
 		Log(LOGWARNING, "No application or playpath in URL!");
-		return true;
+		return 1;
 	}
 	p++; iEnd--;
 
@@ -253,7 +260,7 @@ parsehost:
 	int iPlaypathPos = -1;
 	int iPlaypathLen = -1;
 
-	bool bAddMP4 = false; // used to add at the end mp4: in front of the playpath
+	int bAddMP4 = 0; // used to add at the end mp4: in front of the playpath
 
 	// here filter out semicolon added parameters, e.g. slist=bla...;abc=def
 	//if((temp=strstr(p, ";"))!=0)
@@ -277,7 +284,7 @@ parsehost:
 			// filter .flv from playpath specified with slashes: rtmp://host/app/path.flv
 			if(iPlaypathLen >=4) {
 				if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".f4v", 4)==0 || strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".mp4", 4)==0) {
-					bAddMP4 = true;
+					bAddMP4 = 1;
 				} else if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".flv", 4)==0) {
 					iPlaypathLen-=4;
 				}
@@ -304,6 +311,6 @@ parsehost:
 		Log(LOGWARNING, "No playpath in URL!");
 	}
 
-        return true;
+        return 1;
 }
 

@@ -1,13 +1,13 @@
-CC=arm-linux-gcc
-CXX=arm-linux-g++
-LD=arm-linux-ld
+CROSS_COMPILE=arm-angstrom-linux-gnueabi-
+CC=$(CROSS_COMPILE)gcc -mcpu=cortex-a8
+CXX=$(CROSS_COMPILE)g++ -mcpu=cortex-a8
+LD=$(CROSS_COMPILE)ld
 
-CFLAGS=-Wall
-CXXFLAGS=-Wall
-LDFLAGS=-Wall
-
-CXXFLAGS=-I openssl-0.9.8k/include/
-LDFLAGS=-L openssl-0.9.8k/armlibs/lib/
+OPT=-O2
+STAGING=/home/hyc/oe/tmp/staging/armv7a-angstrom-linux-gnueabi
+CFLAGS=-Wall -I$(STAGING)/usr/include $(OPT)
+CXXFLAGS=-Wall -I$(STAGING)/usr/include $(OPT)
+LDFLAGS=-Wall -L$(STAGING)/usr/lib
 
 all: rtmpdump
 
@@ -20,14 +20,14 @@ streams: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o streams.o parseurl.o dh.o
 rtmpdump: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o rtmpdump.o parseurl.o dh.o handshake.o
 	$(CXX) $(LDFLAGS) $(ARMFLAGS) $^ -o $@_arm -lcrypto
 
-bytes.o: bytes.cpp bytes.h Makefile
-log.o: log.cpp log.h Makefile
+bytes.o: bytes.c bytes.h Makefile
+log.o: log.c log.h Makefile
 rtmp.o: rtmp.cpp rtmp.h log.h AMFObject.h Makefile
 AMFObject.o: AMFObject.cpp AMFObject.h log.h rtmp.h Makefile
 rtmppacket.o: rtmppacket.cpp rtmppacket.h log.h Makefile
 rtmpdump.o: rtmpdump.cpp rtmp.h log.h AMFObject.h Makefile
-parseurl.o: parseurl.cpp parseurl.h log.h Makefile
+parseurl.o: parseurl.c parseurl.h log.h Makefile
 streams.o: streams.cpp log.h Makefile
-dh.o: dh.cpp dh.h log.h Makefile
+dh.o: dh.c dh.h log.h Makefile
 handshake.o: handshake.cpp log.h Makefile
 

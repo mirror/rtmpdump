@@ -34,6 +34,8 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
+int debuglevel = 1;
+
 using namespace RTMP_LIB;
 
 #define RTMPDUMP_VERSION	"v1.6"
@@ -120,9 +122,11 @@ int WriteStream(
 	static bool bFoundFlvKeyframe = false;
 
 	uint32_t prevTagSize = 0;
+	int rtnGetNextMediaPacket = 0;
 	RTMPPacket packet;
 
-	if(rtmp->GetNextMediaPacket(packet))
+	rtnGetNextMediaPacket = rtmp->GetNextMediaPacket(packet);
+	if(rtnGetNextMediaPacket)
 	{
 		char *packetBody	= packet.m_body;
 		unsigned int nPacketLen	= packet.m_nBodySize;
@@ -158,7 +162,7 @@ int WriteStream(
 					std::string metastring = metaObj.GetProperty(0).GetString();
 
                                 	if(metastring == "onMetaData") {
-						// comapre
+						// compare
 						if((nMetaHeaderSize != nPacketLen) || 
 						   (memcmp(metaHeader, packetBody, nMetaHeaderSize) != 0)) {
 							return -2;
@@ -398,6 +402,12 @@ stopKeyframeSearch:
 		if(tsm)
 			*tsm = nTimeStamp;
 
+                // Return 0 if this was completed nicely with invoke message Play.Stop or Play.Complete
+                if (rtnGetNextMediaPacket == 2) {
+                        Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
+                        return 0;
+                }
+
 		return size;
 	}
 
@@ -450,11 +460,14 @@ int main(int argc, char **argv)
 
 	char *hostname = 0;
 	char *playpath = 0;
+	char *subscribepath = 0;
 	int port = -1;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
 
-	long int timeout = 300; // timeout connection afte 300 seconds
+	long int timeout = 300; // timeout connection after 300 seconds
+	uint32_t dStartOffset = 0; // seek position in non-live mode
+	uint32_t dStopOffset = 0;
 
 	char *rtmpurl = 0;
 	char *swfUrl = 0;
@@ -468,7 +481,20 @@ int main(int argc, char **argv)
 
 	char *flvFile = 0;
 
-	char DEFAULT_FLASH_VER[]  = "LNX 9,0,124,0";
+	char DEFAULT_FLASH_VER[]  = "LNX 10,0,22,87";
+	
+	signal(SIGINT, sigIntHandler);
+
+	/* sleep(30); */
+
+	// Check for --quiet option before printing any output
+	int index = 0;
+       	while (index < argc)
+	{
+		if ( strcmp( argv[index], "--quiet")==0 || strcmp( argv[index], "-q")==0 )
+			debuglevel = LOGCRIT;
+		index++;
+	}
 
  	LogPrintf("RTMPDump %s\n", RTMPDUMP_VERSION);
 	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
@@ -495,12 +521,16 @@ int main(int argc, char **argv)
 		{"timeout", 1, NULL, 'm'},
 		{"buffer",  1, NULL, 'b'},
 		{"skip",    1, NULL, 'k'},
+		{"subscribe",1,NULL, 'd'},
+		{"start",   1, NULL, 'A'},
+		{"stop",    1, NULL, 'B'},
+		{"debug",   0, NULL, 'z'},
+		{"quiet",   0, NULL, 'q'},
+		{"verbose", 0, NULL, 'V'},
 		{0,0,0,0}
 	};
 
-	signal(SIGINT, sigIntHandler);
-
-	while((opt = getopt_long(argc, argv, "hver:s:t:p:a:f:o:u:n:c:l:y:m:k:w:x:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:w:x:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");
@@ -518,14 +548,20 @@ int main(int argc, char **argv)
 				LogPrintf("--swfsize|-x num        Size of the decompressed SWF file, required for SWFVerification\n");
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
-				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live strems possible\n");
+				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live streams possible\n");
+				LogPrintf("--subscribe|-d string   Stream name to subscribe to (otherwise defaults to playpath if live is specifed)\n");
 				LogPrintf("--flv|-o string         FLV output file name, if the file name is - print stream to stdout\n");
 				LogPrintf("--resume|-e             Resume a partial RTMP download\n");
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
+				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
+				LogPrintf("--stop|-B num           Stop at num seconds into stream\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
 					nSkipKeyFrames);
+				LogPrintf("--quiet|-q              Supresses all command output.\n");
+				LogPrintf("--verbose|-X            Verbose command output.\n");
+				LogPrintf("--debug|-z              Debug level command output.\n");
 				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
 				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
@@ -570,6 +606,9 @@ int main(int argc, char **argv)
 			}
 			case 'v':
 				bLiveStream = true; // no seeking or resuming possible!
+				break;
+			case 'd':
+				subscribepath = optarg;
 				break;
 			case 'n':
 				hostname = optarg;
@@ -642,6 +681,23 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				timeout = atoi(optarg);
+				break;
+			case 'A':
+				dStartOffset = int(atof(optarg)*1000.0);
+                                //printf("dStartOffset = %d\n", dStartOffset);
+				break;
+			case 'B':
+				dStopOffset = int(atof(optarg)*1000.0);
+                                //printf("dStartOffset = %d\n", dStartOffset);
+				break;
+			case 'q':
+				debuglevel = LOGCRIT;
+				break;
+			case 'V':
+				debuglevel = LOGDEBUG;
+				break;
+			case 'z':
+				debuglevel = LOGALL;
 				break;
 			default:
 				LogPrintf("unknown option: %c\n", opt);
@@ -721,7 +777,8 @@ int main(int argc, char **argv)
 
 	int bufferSize = 1024*1024;
 	char *buffer = (char *)malloc(bufferSize);
-        int nRead = 0;
+	int nRead = 0, count = 0;
+
 
 	memset(buffer, 0, bufferSize);
 
@@ -756,7 +813,7 @@ int main(int argc, char **argv)
 				goto clean;
 			}
 			if(buffer[0] != 'F' || buffer[1] != 'L' || buffer[2] != 'V' || buffer[3] != 0x01) {
-				Log(LOGERROR, "Inavlid FLV file!");
+				Log(LOGERROR, "Invalid FLV file!");
 				nStatus = RD_FAILED;
                                 goto clean;
 			}
@@ -783,7 +840,7 @@ int main(int argc, char **argv)
 				Log(LOGWARNING, "First prevTagSize is not zero: prevTagSize = 0x%08X", prevTagSize);
 			}
 
-			// go through the file to find the mata data!
+			// go through the file to find the meta data!
 			uint32_t pos = dataOffset+4;
 			bool bFoundMetaHeader = false;
 
@@ -969,9 +1026,9 @@ start:
 			file = stdout;
 		else
 		{
-			file = fopen(flvFile, "wb");
+			file = fopen(flvFile, "w");
 			if(file == 0) {
-                        	LogPrintf("Failed to open file!\n");
+                        	LogPrintf("Failed to open file! %s\n", flvFile);
                         	return RD_FAILED;
                 	}
 		}
@@ -984,17 +1041,28 @@ start:
 
 	LogPrintf("Connecting ...\n");
 
+	// User defined seek offset
+	if (dStartOffset > 0) {
+        	if (bLiveStream)
+                	Log(LOGWARNING, "Can't seek in a live stream, ignoring --seek option");
+                // Don't need the offset if resuming an existing file
+                else if (bResume)
+                        Log(LOGDEBUG, "Can't seek a resumed stream, ignoring --seek option");
+                else
+                        dSeek += dStartOffset;
+        }
+
 	//{ // here we decrease the seek time by 10ms to make sure the server starts with the next keyframe
 	//double dFindSeek = dSeek;
 
 	//if(!bAudioOnly && dFindSeek >= 10.0)
 	//	dFindSeek-=10.0;
 
-	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, swfHash, swfSize, flashVer, dSeek, bLiveStream, timeout)) {
+	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, swfHash, swfSize, flashVer, subscribepath, dSeek, bLiveStream, timeout)) {
 		LogPrintf("Failed to connect!\n");
 		return RD_FAILED;
 	}
-	LogPrintf("Connected...\n\n");
+	Log(LOGINFO, "Connected...");
 	//}
 	
 	/*#ifdef _DEBUG
@@ -1007,13 +1075,16 @@ start:
 	}
 
 	// print initial status
-	LogPrintf("Starting download at ");
-	if(duration > 0) {
+	// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
+	if( duration > 0 && (double)timestamp >= (double)duration*999.0 ) {
+                LogPrintf("Already Completed at: TS=%.1f Duration=%.1f\n", (double)timestamp, (double)duration);
+                goto clean;
+        } else if(duration > 0) {
 		percent = ((double)timestamp) / (duration*1000.0)*100.0;
                 percent = round(percent*10.0)/10.0;
-                LogPrintf("%.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
+                LogPrintf("Starting download at %.3f kB (%.1f%%)\n", (double)size/1024.0, percent);
         } else {
-                LogPrintf("%.3f KB\n", (double)size/1024.0);
+                LogPrintf("Starting download at %.3f kB\n", (double)size/1024.0);
         }
 
 	// write FLV header if not resuming
@@ -1032,10 +1103,11 @@ start:
 			goto clean;
 		}
 	}
-
 	do
 	{
 		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+
+#define PRINT_CHUNK	32768
 
 		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {
@@ -1045,6 +1117,7 @@ start:
                                 goto clean;
                         }
 			size += nRead;
+			count += nRead;
 	
 			//LogPrintf("write %dbytes (%.1f KB)\n", nRead, nRead/1024.0);
 			if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
@@ -1061,38 +1134,73 @@ start:
 				}
 				percent = ((double)timestamp) / (duration*1000.0)*100.0;
 				percent = round(percent*10.0)/10.0;
-				LogPrintf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
+				if (count > PRINT_CHUNK && debuglevel >= LOGINFO) {
+					LogPrintf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
+					count = 0;
+				}
 			} else {
-				LogPrintf("\r%.3f KB", (double)size/1024.0);
+				if (count > PRINT_CHUNK && debuglevel >= LOGINFO) {
+					LogPrintf("\r%.3f KB", (double)size/1024.0);
+					count = 0;
+				}
 			}
 		}
 		#ifdef _DEBUG
 		else { Log(LOGDEBUG, "zero read!"); }
 		#endif
 
-	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
+		// Force clean close if a specified stop offset is reached
+		if (dStopOffset && timestamp >= dStopOffset) {
+		        LogPrintf("\nStop offset has been reached at %.2f seconds\n", (double)dStopOffset/1000.0);
+		        nRead = 0;
+		        rtmp->Close();
+		}
 
-	if(bResume && nRead == -2) {
-		LogPrintf("Couldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
-		nStatus = RD_FAILED;
-		goto clean;
-	}
+	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 
 	// finalize header by writing the correct dataType (video, audio, video+audio)
 	if(!bResume && dataType != 0x5 && !bStdoutMode) {
-		//Log(LOGDEBUG, "Writing data type: %02X", dataType);
+		Log(LOGDEBUG, "Writing data type: %02X", dataType);
 		fseek(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
-	if((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1)) {
-		Log(LOGWARNING, "Download may be incomplete (downloaded about %.1f%%), try --resume!", percent);
-		nStatus = RD_INCOMPLETE;
+
+	if(bResume && nRead == -2) {
+		LogPrintf("\rCouldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
+		nStatus = RD_FAILED;
+		goto clean;
+	}
+	
+	// If duration is available then assume the download is complete if > 99.9%
+	if (bLiveStream == false) {
+		if (duration > 0 && percent > 99.9) {
+			LogPrintf("\nDownload complete\n");
+			nStatus = RD_SUCCESS;
+			goto clean;
+		//} else if ( bCtrlC || nRead != (-1) ) {
+		} else {
+			LogPrintf("\nDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+			nStatus = RD_INCOMPLETE;
+			goto clean;
+		}
 	}
 
+	// If nRead is zero then assume complete
+	if(nRead == 0) {
+	        LogPrintf("\nDownload complete\n");
+	        nStatus = RD_SUCCESS;
+	        goto clean;
+	}
+	
+	// Ensure we have a non-zero exit code where WriteStream has failed
+	if (nRead < 0)
+		nStatus = RD_INCOMPLETE;
+
+        //Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
-	LogPrintf("Closing connection... ");
+	LogPrintf("\rClosing connection.\n");
 	rtmp->Close();
-	LogPrintf("done!\n\n");
+	//LogPrintf("done!\n\n");
 
 	if(file != 0)
 		fclose(file);

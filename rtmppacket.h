@@ -23,6 +23,7 @@
  */
 
 #include <string>
+#include <stdint.h>
 
 #define RTMP_PACKET_TYPE_AUDIO 0x08
 #define RTMP_PACKET_TYPE_VIDEO 0x09
@@ -56,7 +57,7 @@ namespace RTMP_LIB
 
       BYTE	m_headerType;
       BYTE	m_packetType;
-      BYTE	m_nChannel;
+      int	m_nChannel;
       int32_t	m_nInfoField1; // 3 first bytes
       int32_t	m_nInfoField2; // last 4 bytes in a long header, absolute timestamp for long headers, relative timestamp for short headers 
       bool      m_hasAbsTimestamp; // timestamp absolute or relative?

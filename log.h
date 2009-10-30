@@ -23,6 +23,10 @@
 
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Enable this to get full debugging output
 //#define _DEBUG
 #define CRYPTO
 
@@ -30,16 +34,20 @@
 #undef NODEBUG
 #endif
 
-#define LOGDEBUG        0
+#define LOGCRIT         0
 #define LOGERROR        1
 #define LOGWARNING	2
 #define LOGINFO		3
+#define LOGDEBUG		4
+#define LOGALL		5
 
 void LogSetOutput(FILE *file);
 void LogPrintf(const char *format, ...);
 void Log(int level, const char *format, ...);
-void LogHex(const char *data, unsigned long len);
+void LogHex(int level, const char *data, unsigned long len);
 void LogHexString(const char *data, unsigned long len);
 
+#ifdef __cplusplus
+}
 #endif
-
+#endif

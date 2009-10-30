@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef WIN32
 // Windows is little endian only 
 #define __LITTLE_ENDIAN 1234
@@ -97,6 +101,10 @@ double ReadNumber(const char *data);
 
 int ReadInt32LE(const char *data);
 int EncodeInt32LE(char *output, int nVal);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

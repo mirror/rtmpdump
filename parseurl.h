@@ -20,8 +20,14 @@
  *
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 int hex2bin(char *str, char **hex);
-bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
+int ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

@@ -27,11 +27,16 @@
 
 #include "bytes.h"
 
-bool isValidPublicKey(BIGNUM *y, BIGNUM *p, BIGNUM *q);
+#ifdef __cplusplus
+extern "C" {
+#endif
+int isValidPublicKey(BIGNUM *y, BIGNUM *p, BIGNUM *q);
 DH* DHInit(int nKeyBits);
-bool DHGenerateKey(DH *dh);
-bool DHGetPublicKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen);
-bool DHGetPrivateKey(DH *dh, uint8_t *privkey, size_t nPrivkeyLen);
+int DHGenerateKey(DH *dh);
+int DHGetPublicKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen);
+int DHGetPrivateKey(DH *dh, uint8_t *privkey, size_t nPrivkeyLen);
 int DHComputeSharedSecretKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen, uint8_t *secret);
 void DHFree(DH *dh);
-
+#ifdef __cplusplus
+}
+#endif

@@ -84,6 +84,7 @@ typedef struct
 	char *SWFHash;
 	uint32_t SWFSize;
 	char *flashVer;
+	char *subscribepath;
 
 	double seekTime;
 	bool bLiveStream;
@@ -123,6 +124,7 @@ class CRTMP
 	char *swfSHA256Hash,
 	uint32_t swfSize,
 	char *flashVer, 
+	char *subscribepath, 
       	double dTime,
 	bool bLiveStream,
 	long int timeout=300);
@@ -130,7 +132,7 @@ class CRTMP
       bool IsConnected(); 
       double GetDuration();
 
-      bool GetNextMediaPacket(RTMPPacket &packet);
+      int GetNextMediaPacket(RTMPPacket &packet);
 
       void Close();
 
@@ -147,7 +149,9 @@ class CRTMP
       static std::string ReadString(const char *data);
       static bool ReadBool(const char *data);
       static double ReadNumber(const char *data);
+	  bool SendPause(bool DoPause, double dTime);
 
+	  static bool DumpMetaData(AMFObject &obj);
       static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
 
     protected:
@@ -161,13 +165,14 @@ class CRTMP
       bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
+      bool SendDeleteStream(double dStreamId);
+      bool SendFCSubscribe(char *subscribepath);
       bool SendPlay();
-      bool SendPause();
       bool SendSeek(double dTime);
       bool SendBytesReceived();
 
-      void HandleInvoke(const char *body, unsigned int nBodySize);
-      void HandleMetadata(char *body, unsigned int len);
+      int HandleInvoke(const char *body, unsigned int nBodySize);
+      bool HandleMetadata(char *body, unsigned int len);
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);
       void HandleVideo(const RTMPPacket &packet);
@@ -184,6 +189,7 @@ class CRTMP
       bool WriteN(const char *buffer, int n);
 
       bool FillBuffer();
+	  void FlushBuffer();
 
       int  m_socket;
       int  m_chunkSize;
@@ -205,14 +211,12 @@ class CRTMP
       char *m_pBuffer;      // data read from socket
       char *m_pBufferStart; // pointer into m_pBuffer of next byte to process
       int  m_nBufferSize;   // number of unprocessed bytes in buffer
-      RTMPPacket m_vecChannelsIn[64];
-      RTMPPacket m_vecChannelsOut[64];
-      int  m_channelTimestamp[64]; // abs timestamp of last packet
+      RTMPPacket *m_vecChannelsIn[65600];
+      RTMPPacket *m_vecChannelsOut[65600];
+      int  m_channelTimestamp[65600]; // abs timestamp of last packet
 
       double m_fDuration; // duration of stream in seconds
   };
 };
 
 #endif
-
-

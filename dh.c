@@ -50,7 +50,7 @@ void dh_pg_init()
 */
 
 // RFC 2631, Section 2.1.5, http://www.ietf.org/rfc/rfc2631.txt
-bool isValidPublicKey(BIGNUM *y, BIGNUM *p , BIGNUM *q)
+int isValidPublicKey(BIGNUM *y, BIGNUM *p , BIGNUM *q)
 {
 	assert(y);
 
@@ -96,11 +96,11 @@ bool isValidPublicKey(BIGNUM *y, BIGNUM *p , BIGNUM *q)
 
 	BN_free(bn);
 
-	return true;
+	return 1;
 failed:
 	//Log(LOGDEBUG, "Insecure DH public key: %s", BN_bn2hex(y));
 	BN_free(bn);
-	return false;
+	return 0;
 }
 
 DH* DHInit(int nKeyBits)
@@ -133,16 +133,16 @@ failed:
 	return 0;
 }
 
-bool DHGenerateKey(DH *dh)
+int DHGenerateKey(DH *dh)
 {
 	if(!dh)
-		return false;
+		return 0;
 
-	bool res = false;
+	int res = 0;
 	while(!res)
 	{
 		if(!DH_generate_key(dh))
-			return false;
+			return 0;
 	
 		BIGNUM *q1 = BN_new();
 		assert(BN_hex2bn(&q1, Q1024));
@@ -156,38 +156,38 @@ bool DHGenerateKey(DH *dh)
 
 		BN_free(q1);
 	}
-	return true;
+	return 1;
 }
 
 // fill pubkey with the public key in BIG ENDIAN order
 // 00 00 00 00 00 x1 x2 x3 .....
 
-bool DHGetPublicKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen)
+int DHGetPublicKey(DH *dh, uint8_t *pubkey, size_t nPubkeyLen)
 {
 	if(!dh || !dh->pub_key)
-		return false;
+		return 0;
 	
 	int len = BN_num_bytes(dh->pub_key);
 	if(len <= 0 || len > (int)nPubkeyLen)
-		return false;
+		return 0;
 
 	memset(pubkey, 0, nPubkeyLen);
 	BN_bn2bin(dh->pub_key, pubkey + (nPubkeyLen - len));
-	return true;
+	return 1;
 }
 
-bool DHGetPrivateKey(DH *dh, uint8_t *privkey, size_t nPrivkeyLen)
+int DHGetPrivateKey(DH *dh, uint8_t *privkey, size_t nPrivkeyLen)
 {
         if(!dh || !dh->priv_key)
-                return false;
+                return 0;
         
         int len = BN_num_bytes(dh->priv_key);
         if(len <= 0 || len > (int)nPrivkeyLen)
-                return false;
+                return 0;
 
         memset(privkey, 0, nPrivkeyLen);
         BN_bn2bin(dh->priv_key, privkey + (nPrivkeyLen - len));
-        return true;
+        return 1;
 }
 
 // computes the shared secret key from the private DH value and the othe parties public key (pubkey)

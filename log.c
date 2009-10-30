@@ -20,12 +20,15 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include "log.h"
 
 #define MAX_PRINT_LEN	2048
 
-FILE *fmsg = stderr;
+extern int debuglevel;
+
+FILE *fmsg;
 
 void LogSetOutput(FILE *file)
 {
@@ -34,38 +37,52 @@ void LogSetOutput(FILE *file)
 
 void LogPrintf(const char *format, ...)
 {
-        char str[MAX_PRINT_LEN]="";
+	char str[MAX_PRINT_LEN]="";
+	va_list args;
+	va_start(args, format);
+	vsnprintf(str, MAX_PRINT_LEN-1, format, args);
+	va_end(args);
 
-        va_list args;
-        va_start(args, format);
-        vsnprintf(str, MAX_PRINT_LEN-1, format, args);
-        va_end(args);
+	if ( debuglevel==LOGCRIT )
+		return;
 
-        fprintf(fmsg, "%s", str);
-	#ifdef _DEBUG
+	if ( !fmsg ) fmsg = stderr;
+
+	fprintf(fmsg, "%s", str);
+#ifdef _DEBUG
 	fflush(fmsg);
-	#endif
+#endif
 }
 
 void Log(int level, const char *format, ...)
 {
-        char str[MAX_PRINT_LEN]="";
+	char str[MAX_PRINT_LEN]="";
+	va_list args;
+	va_start(args, format);
+	vsnprintf(str, MAX_PRINT_LEN-1, format, args);
+	va_end(args);
 
-        va_list args;
-        va_start(args, format);
-        vsnprintf(str, MAX_PRINT_LEN-1, format, args);
-        va_end(args);
+	// Filter out 'no-name'
+	if ( debuglevel<LOGALL && strstr(str, "no-name" ) != NULL )
+		return;
 
-	//if(level != LOGDEBUG)
-        fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?"ERROR":(level==LOGWARNING?"WARNING":"INFO")), str);
-	#ifdef _DEBUG
+	if ( !fmsg ) fmsg = stderr;
+
+	if ( level <= debuglevel )
+		fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?
+"ERROR":(level==LOGWARNING?"WARNING":(level==LOGCRIT?"CRIT":"INFO"))), str);
+
+#ifdef _DEBUG
 	fflush(fmsg);
-	#endif
+#endif
 }
 
-void LogHex(const char *data, unsigned long len)
+void LogHex(int level, const char *data, unsigned long len)
 {
-	for(unsigned long i=0; i<len; i++) {
+	unsigned long i;
+	if ( level > debuglevel )
+		return;
+	for(i=0; i<len; i++) {
 		LogPrintf("%02X ", (unsigned char)data[i]);
 	}
 	LogPrintf("\n");
@@ -73,14 +90,16 @@ void LogHex(const char *data, unsigned long len)
 
 void LogHexString(const char *data, unsigned long len)
 {
-        for(unsigned long i=0; i<len; i++) {
-                LogPrintf("%02X ", (unsigned char)data[i]);
-        }
-        LogPrintf("\n");
+	unsigned long i;
+	if ( debuglevel==LOGCRIT )
+		return;
+	for(i=0; i<len; i++) {
+		LogPrintf("%02X ", (unsigned char)data[i]);
+	}
+	LogPrintf("\n");
 
-        for(unsigned long i=0; i<len; i++) {
-                LogPrintf("%c", (unsigned char)data[i]);
-        }
-        LogPrintf("\n");
+	for(i=0; i<len; i++) {
+		LogPrintf("%c", (unsigned char)data[i]);
+	}
+	LogPrintf("\n");
 }
-

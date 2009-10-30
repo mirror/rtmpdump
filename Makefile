@@ -11,7 +11,7 @@ CFLAGS=-Wall $(INC) $(OPT)
 CXXFLAGS=-Wall $(INC) $(OPT)
 LDFLAGS=-Wall
 #LIBS=-lws2_32 -lwinmm -lcrypto -lgdi32
-LIBS=-lssl -lcrypto
+LIBS=-lcrypto
 THREADLIB=-lpthread
 SLIBS=$(THREADLIB) $(LIBS)
 

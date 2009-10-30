@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -56,6 +57,8 @@ static const int packetSize[] = { 12, 8, 4, 1 };
 #define RTMP_PACKET_SIZE_SMALL    2
 #define RTMP_PACKET_SIZE_MINIMUM  3
 
+extern bool bCtrlC;
+
 int32_t GetTime()
 {
 #ifdef _DEBUG
@@ -64,7 +67,7 @@ int32_t GetTime()
 	return timeGetTime();
 #else
 	struct tms t;
-	return times(&t);
+	return times(&t)*1000/sysconf(_SC_CLK_TCK);
 #endif
 }
 
@@ -94,6 +97,11 @@ CRTMP::CRTMP() : m_socket(0)
   m_pBuffer = new char[RTMP_BUFFER_CACHE_SIZE];
   m_nBufferMS = 300;
   m_fDuration = 0;
+  m_stream_id = -1;
+  m_pBufferStart = NULL;
+  m_fAudioCodecs = 3191.0;
+  m_fVideoCodecs = 252.0;
+  m_bTimedout = false;
 }
 
 CRTMP::~CRTMP()
@@ -104,6 +112,7 @@ CRTMP::~CRTMP()
 
 double CRTMP::GetDuration() { return m_fDuration; }
 bool CRTMP::IsConnected() { return m_socket != 0; }
+bool CRTMP::IsTimedout() { return m_bTimedout; }
 
 void CRTMP::SetBufferMS(int size)
 {
@@ -115,20 +124,20 @@ void CRTMP::UpdateBufferMS()
   SendPing(3, 1, m_nBufferMS);
 }
 
-bool CRTMP::Connect(
+void CRTMP::SetupStream(
 	int protocol, 
-	char *hostname, 
+	const char *hostname, 
 	unsigned int port, 
-	char *playpath, 
-	char *tcUrl, 
-	char *swfUrl, 
-	char *pageUrl, 
-	char *app, 
-	char *auth,
-	char *swfSHA256Hash,
+	const char *playpath, 
+	const char *tcUrl, 
+	const char *swfUrl, 
+	const char *pageUrl, 
+	const char *app, 
+	const char *auth,
+	const char *swfSHA256Hash,
 	uint32_t swfSize,
-	char *flashVer, 
-	char *subscribepath, 
+	const char *flashVer, 
+	const char *subscribepath, 
 	double dTime,
 	bool bLiveStream,
 	long int timeout
@@ -190,9 +199,17 @@ bool CRTMP::Connect(
 
   if (Link.port == 0)
     Link.port = 1935;
-  
+}
+
+bool CRTMP::Connect() {
+  if (!Link.hostname)
+     return false;
+
   // close any previous connection
   Close();
+
+  m_bTimedout = false;
+  m_fDuration = 0.0;
 
   sockaddr_in service;
   memset(&service, 0, sizeof(sockaddr_in));
@@ -215,7 +232,9 @@ bool CRTMP::Connect(
   {
     if (connect(m_socket, (sockaddr*) &service, sizeof(struct sockaddr)) < 0)
     {
-      Log(LOGERROR, "%s, failed to connect socket. Error: %d", __FUNCTION__, GetSockError());
+      int err = GetSockError();
+      Log(LOGERROR, "%s, failed to connect socket. %d (%s)", __FUNCTION__,
+	err, strerror(err));
       Close();
       return false;
     }
@@ -229,7 +248,7 @@ bool CRTMP::Connect(
     }
 
     Log(LOGDEBUG, "%s, handshaked", __FUNCTION__);
-    if (!Connect())
+    if (!RTMPConnect())
     {
       Log(LOGERROR, "%s, RTMP connect failed.", __FUNCTION__);
       Close();
@@ -254,6 +273,56 @@ bool CRTMP::Connect(
   return true;
 }
 
+bool CRTMP::ConnectStream(double seekTime) {
+  if (seekTime >= -2.0)
+    Link.seekTime = seekTime;
+
+  RTMPPacket packet;
+  while (!m_bPlaying && IsConnected() && ReadPacket(packet)) {
+    if (!packet.IsReady())
+    {
+      packet.FreePacket();
+      continue;
+    }
+    
+    if ((packet.m_packetType == 0x8) || \
+        (packet.m_packetType == 0x9) || \
+        (packet.m_packetType == 0x16))
+    {
+      Log(LOGDEBUG, "%s, received FLV packet before play()!", __FUNCTION__);
+      break;
+    }
+
+    HandlePacket(packet);
+  }
+
+  return m_bPlaying;
+}
+
+bool CRTMP::ReconnectStream(int bufferTime, double seekTime) {
+  DeleteStream();
+
+  SendCreateStream(2.0);
+
+  SetBufferMS(bufferTime);
+  UpdateBufferMS();
+
+  return ConnectStream(seekTime);
+}
+
+void CRTMP::DeleteStream() {
+  if (m_stream_id < 0)
+    return;
+
+  m_bPlaying = false;
+
+  SendDeleteStream(m_stream_id);
+
+  // No response expected for deleteStream
+  if (m_methodCalls.back() == "deleteStream")
+    m_methodCalls.erase(m_methodCalls.end());
+}
+
 int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 {
   int bHasMediaPacket = 0;
@@ -266,6 +335,21 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
       continue;
     }
 
+    bHasMediaPacket = HandlePacket(packet);
+
+    if (!bHasMediaPacket) { 
+      packet.FreePacket();
+    }
+  }
+        
+  if (bHasMediaPacket)
+    m_bPlaying = true;
+
+  return bHasMediaPacket;
+}
+
+int CRTMP::HandlePacket(RTMPPacket &packet) {
+  int bHasMediaPacket = 0;
     switch (packet.m_packetType)
     {
       case 0x01:
@@ -285,14 +369,12 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 
       case 0x05:
         // server bw
-        Log(LOGDEBUG, "%s, received: server BW", __FUNCTION__);
-	//LogHex(packet.m_body, packet.m_nBodySize);
+	HandleServerBW(packet);
         break;
 
       case 0x06:
         // client bw
-        Log(LOGDEBUG, "%s, received: client BW", __FUNCTION__);
-	//LogHex(packet.m_body, packet.m_nBodySize);
+	HandleClientBW(packet);
         break;
 
       case 0x08:
@@ -386,14 +468,6 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 	#endif
     }
 
-    if (!bHasMediaPacket) { 
-      packet.FreePacket();
-    }
-  }
-        
-  if (bHasMediaPacket)
-    m_bPlaying = true;
-
   return bHasMediaPacket;
 }
 
@@ -406,6 +480,8 @@ int CRTMP::ReadN(char *buffer, int n)
 {
   int nOriginalSize = n;
   
+  m_bTimedout = false;
+
   #ifdef _DEBUG
   memset(buffer, 0, n);
   #endif
@@ -415,10 +491,11 @@ int CRTMP::ReadN(char *buffer, int n)
   {
     int nBytes = 0;
     if(m_nBufferSize == 0)
-		if (!FillBuffer()) {
-			Close();
-			return 0;
-		}
+	if (!FillBuffer()) {
+	   if (!m_bTimedout)
+	     Close();
+	   return 0;
+	}
     int nRead = ((n<m_nBufferSize)?n:m_nBufferSize);
     if(nRead > 0) {
     	memcpy(ptr, m_pBufferStart, nRead);
@@ -426,7 +503,7 @@ int CRTMP::ReadN(char *buffer, int n)
 	m_nBufferSize -= nRead;
 	nBytes = nRead;
 	m_nBytesIn += nRead;
-	if(m_nBytesIn > m_nBytesInSent + (600*1024)) // report every 600K
+	if(m_nBytesIn > m_nBytesInSent + m_nClientBW/2 )
 		SendBytesReceived();
     }
 
@@ -483,7 +560,12 @@ bool CRTMP::WriteN(const char *buffer, int n)
     
     if (nBytes < 0)
     {
-      Log(LOGERROR, "%s, RTMP send error %d (%d bytes)", __FUNCTION__, GetSockError(), n);
+      int sockerr = GetSockError();
+      Log(LOGERROR, "%s, RTMP send error %d (%d bytes)", __FUNCTION__, sockerr, n);
+
+      if (sockerr == EINTR && !bCtrlC)
+	continue;
+      
       Close();
 
       if(encrypted)
@@ -504,7 +586,7 @@ bool CRTMP::WriteN(const char *buffer, int n)
   return n == 0;
 }
 
-bool CRTMP::Connect()
+bool CRTMP::RTMPConnect()
 {
   if (!SendConnectPacket())
   {
@@ -540,8 +622,8 @@ bool CRTMP::SendConnectPacket()
   
   enc += EncodeBoolean(enc, "fpad", false);
   enc += EncodeNumber(enc, "capabilities", 15.0);
-  enc += EncodeNumber(enc, "audioCodecs", 3191.0);
-  enc += EncodeNumber(enc, "videoCodecs", 252.0);
+  enc += EncodeNumber(enc, "audioCodecs", m_fAudioCodecs);
+  enc += EncodeNumber(enc, "videoCodecs", m_fVideoCodecs);
   enc += EncodeNumber(enc, "videoFunction", 1.0);
   if(Link.pageUrl)
   	enc += EncodeString(enc, "pageUrl", Link.pageUrl);
@@ -558,8 +640,8 @@ bool CRTMP::SendConnectPacket()
   // add auth string
   if(Link.auth)
   {
-  	*enc = 0x01; enc++;
-  	*enc = 0x01; enc++;
+//  	*enc = 0x01; enc++;
+//  	*enc = 0x01; enc++;
 
   	enc += EncodeString(enc, Link.auth);
   }
@@ -608,7 +690,7 @@ bool CRTMP::SendCreateStream(double dStreamId)
   return SendRTMP(packet);
 }
 
-bool CRTMP::SendFCSubscribe(char *subscribepath)
+bool CRTMP::SendFCSubscribe(const char *subscribepath)
 {
   RTMPPacket packet;
   packet.m_nChannel = 0x03;   // control channel (invoke)
@@ -700,7 +782,7 @@ bool CRTMP::SendServerBW()
   packet.AllocPacket(4);
   packet.m_nBodySize = 4;
 
-  EncodeInt32(packet.m_body, 0x001312d0); // hard coded for now
+  EncodeInt32(packet.m_body, m_nServerBW);
   return SendRTMP(packet);
 }
 
@@ -780,18 +862,14 @@ bool CRTMP::SendPlay()
   Log(LOGDEBUG, "%s, sending play: %s", __FUNCTION__, Link.playpath);
   enc += EncodeString(enc, Link.playpath);
 
+  // Optional parameters start and len.
+
   // start: -2, -1, 0, positive number
   //  -2: looks for a live stream, then a recorded stream, if not found any open a live stream
   //  -1: plays a live stream
   // >=0: plays a recorded streams from 'start' milliseconds
-  if(Link.bLiveStream)
-    enc += EncodeNumber(enc, -1000.0);
-  else {
-    if(Link.seekTime > 0.0)
-      enc += EncodeNumber(enc, Link.seekTime); // resume from here
-    else
-      enc += EncodeNumber(enc, 0.0);//-2000.0); // recorded as default, -2000.0 is not reliable since that freezes the player if the stream is not found
-  }
+  if(Link.seekTime > 0.0)
+    enc += EncodeNumber(enc, Link.seekTime); // resume from here
   
   // len: -1, 0, positive number
   //  -1: plays live or recorded stream to the end (default)
@@ -913,6 +991,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     }
     else if (CSCMP(methodInvoked,"play"))
     {
+	m_bPlaying = true;
 	  SendPlay();
     }
   }
@@ -952,8 +1031,16 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     if (code == "NetStream.Failed"
     ||  code == "NetStream.Play.Failed"
     ||  code == "NetStream.Play.StreamNotFound"
-    ||  code == "NetConnection.Connect.InvalidApp")
+    ||  code == "NetConnection.Connect.InvalidApp") {
+      m_stream_id = -1;
       Close();
+    }
+
+    if (code == "NetStream.Play.Start") {
+      m_bPlaying = true;
+      if (m_methodCalls[0] == "play")
+        m_methodCalls.erase(m_methodCalls.begin());
+    }
 
     // Return 1 if this is a Play.Complete or Play.Stop
     if (code == "NetStream.Play.Complete"
@@ -1130,6 +1217,20 @@ void CRTMP::HandlePing(const RTMPPacket &packet)
 	  Log(LOGWARNING, "%s: Ignoring SWFVerification request, use --swfhash and --swfsize!", __FUNCTION__);
 	}
   }
+}
+
+void CRTMP::HandleServerBW(const RTMPPacket &packet) {
+  m_nServerBW = ReadInt32(packet.m_body);
+  Log(LOGDEBUG, "%s: server BW = %d", __FUNCTION__, m_nServerBW);
+}
+
+void CRTMP::HandleClientBW(const RTMPPacket &packet) {
+  m_nClientBW = ReadInt32(packet.m_body);
+  if (packet.m_nBodySize > 4)
+    m_nClientBW2 = packet.m_body[4];
+  else
+    m_nClientBW2 = -1;
+  Log(LOGDEBUG, "%s: client BW = %d %d", __FUNCTION__, m_nClientBW, m_nClientBW2);
 }
 
 bool CRTMP::ReadPacket(RTMPPacket &packet)
@@ -1420,10 +1521,10 @@ bool CRTMP::HandShake(bool FP9HandShake)
   memset(&clientsig[5], 0, 4);
 
 #ifdef _DEBUG
-    for (int i=9; i<=RTMP_SIG_SIZE; i++) 
+    for (int i=9; i<RTMP_SIG_SIZE; i++) 
       clientsig[i] = 0xff;
 #else
-    for (int i=9; i<=RTMP_SIG_SIZE; i++)
+    for (int i=9; i<RTMP_SIG_SIZE; i++)
       clientsig[i] = (char)(rand() % 256);
 #endif
 
@@ -1543,8 +1644,10 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
 #endif
   }
 
-  if (packet.m_packetType == 0x14) // we invoked a remote method, keep it in call queue till result arrives
+  if (packet.m_packetType == 0x14) { // we invoked a remote method, keep it in call queue till result arrives
     m_methodCalls.push_back(ReadString(packet.m_body + 1));
+    Log(LOGDEBUG, "Invoking %s", ReadString(packet.m_body + 1).c_str());
+  }
 
   if (!m_vecChannelsOut[packet.m_nChannel])
     m_vecChannelsOut[packet.m_nChannel] = new RTMPPacket;
@@ -1558,11 +1661,15 @@ void CRTMP::Close()
   if (IsConnected())
     close(m_socket);
 
+  m_stream_id = -1;
   m_socket = 0;
   m_chunkSize = 128;
   m_nBWCheckCounter = 0;
   m_nBytesIn = 0;
   m_nBytesInSent = 0;
+  m_nClientBW = 2500000;
+  m_nClientBW2 = 2;
+  m_nServerBW = 2500000;
 
   for (int i=0; i<65600; i++)
   {
@@ -1575,6 +1682,7 @@ void CRTMP::Close()
 	  m_vecChannelsOut[i] = NULL;
 	}
   }
+  m_methodCalls.clear();
 
   m_bPlaying = false;
   m_nBufferSize = 0;
@@ -1583,15 +1691,25 @@ void CRTMP::Close()
 bool CRTMP::FillBuffer()
 {
     assert(m_nBufferSize == 0); // only fill buffer when it's empty
-    int nBytes = recv(m_socket, m_pBuffer, RTMP_BUFFER_CACHE_SIZE, 0);
+    int nBytes;
+
+again:
+    nBytes = recv(m_socket, m_pBuffer, RTMP_BUFFER_CACHE_SIZE, 0);
     if(nBytes != -1) {
     	m_nBufferSize += nBytes;
 	m_pBufferStart = m_pBuffer;
     }
     else
     {
-      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, GetSockError());
-      Close();
+      int sockerr = GetSockError();
+      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, sockerr);
+      if (sockerr == EINTR && !bCtrlC)
+        goto again;
+
+      if (sockerr == EWOULDBLOCK || sockerr == EAGAIN)
+        m_bTimedout = true;
+      else
+        Close();
       return false;
     }
 

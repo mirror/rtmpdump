@@ -526,10 +526,10 @@ bool CRTMP::HandShake(bool FP9HandShake)
 		// generate signed answer
 		char clientResp[RTMP_SIG_SIZE]; 
 #ifdef _DEBUG
-        	for(int i=0; i<=RTMP_SIG_SIZE; i++)
+        	for(int i=0; i<RTMP_SIG_SIZE; i++)
                 	clientResp[i] = 0;//(char)(rand() % 256);//0xff;
 #else
-        	for(int i=0; i<=RTMP_SIG_SIZE; i++)
+        	for(int i=0; i<RTMP_SIG_SIZE; i++)
                 	clientResp[i] = (char)(rand() % 256);
 #endif
 

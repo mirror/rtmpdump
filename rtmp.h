@@ -71,20 +71,20 @@ namespace RTMP_LIB
 
 typedef struct
 {
-        char *hostname;
+        const char *hostname;
         unsigned int port;
 	int protocol;
-	char *playpath;
+	const char *playpath;
 
-        char *tcUrl;
-        char *swfUrl;
-        char *pageUrl;
-        char *app;
-        char *auth;
-	char *SWFHash;
+        const char *tcUrl;
+        const char *swfUrl;
+        const char *pageUrl;
+        const char *app;
+        const char *auth;
+	const char *SWFHash;
 	uint32_t SWFSize;
-	char *flashVer;
-	char *subscribepath;
+	const char *flashVer;
+	const char *subscribepath;
 
 	double seekTime;
 	bool bLiveStream;
@@ -111,27 +111,33 @@ class CRTMP
       void SetBufferMS(int size);
       void UpdateBufferMS();
 
-      bool Connect(
+      void SetupStream(
       	int protocol, 
-	char *hostname, 
+	const char *hostname, 
 	unsigned int port, 
-	char *playpath, 
-	char *tcUrl, 
-	char *swfUrl, 
-	char *pageUrl, 
-	char *app, 
-	char *auth,
-	char *swfSHA256Hash,
+	const char *playpath, 
+	const char *tcUrl, 
+	const char *swfUrl, 
+	const char *pageUrl, 
+	const char *app, 
+	const char *auth,
+	const char *swfSHA256Hash,
 	uint32_t swfSize,
-	char *flashVer, 
-	char *subscribepath, 
+	const char *flashVer, 
+	const char *subscribepath, 
       	double dTime,
 	bool bLiveStream,
 	long int timeout=300);
 
+      bool Connect();
+
       bool IsConnected(); 
+      bool IsTimedout(); 
       double GetDuration();
 
+      bool ConnectStream(double seekTime=-10.0);
+      bool ReconnectStream(int bufferTime, double seekTime=-10.0);
+      void DeleteStream();
       int GetNextMediaPacket(RTMPPacket &packet);
 
       void Close();
@@ -156,7 +162,7 @@ class CRTMP
 
     protected:
       bool HandShake(bool FP9HandShake=true);
-      bool Connect();
+      bool RTMPConnect();
 
       bool SendConnectPacket();
       bool SendServerBW();
@@ -166,17 +172,20 @@ class CRTMP
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
       bool SendDeleteStream(double dStreamId);
-      bool SendFCSubscribe(char *subscribepath);
+      bool SendFCSubscribe(const char *subscribepath);
       bool SendPlay();
       bool SendSeek(double dTime);
       bool SendBytesReceived();
 
+      int HandlePacket(RTMPPacket &packet);
       int HandleInvoke(const char *body, unsigned int nBodySize);
       bool HandleMetadata(char *body, unsigned int len);
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);
       void HandleVideo(const RTMPPacket &packet);
       void HandlePing(const RTMPPacket &packet);
+      void HandleServerBW(const RTMPPacket &packet);
+      void HandleClientBW(const RTMPPacket &packet);
      
       int EncodeString(char *output, const std::string &strName, const std::string &strValue);
       int EncodeNumber(char *output, const std::string &strName, double dVal);
@@ -199,6 +208,10 @@ class CRTMP
       bool m_bPlaying;
       int  m_nBufferMS;
       int  m_stream_id; // returned in _result from invoking createStream
+      bool m_bTimedout;
+      int m_nClientBW;
+      uint8_t m_nClientBW2;
+      int m_nServerBW;
 
       //std::string m_strPlayer;
       //std::string m_strPageUrl;
@@ -214,6 +227,9 @@ class CRTMP
       RTMPPacket *m_vecChannelsIn[65600];
       RTMPPacket *m_vecChannelsOut[65600];
       int  m_channelTimestamp[65600]; // abs timestamp of last packet
+
+      double m_fAudioCodecs; // audioCodecs for the connect packet
+      double m_fVideoCodecs; // videoCodecs for the connect packet
 
       double m_fDuration; // duration of stream in seconds
   };

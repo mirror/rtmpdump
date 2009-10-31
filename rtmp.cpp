@@ -1211,8 +1211,8 @@ void CRTMP::HandlePing(const RTMPPacket &packet)
   if (packet.m_nBodySize >= 6) {
     switch(nType) {
     case 0:
-      m_ctrl_sid = ReadInt32(packet.m_body + 2);
-      Log(LOGDEBUG, "%s, Stream Begin %d", __FUNCTION__, m_ctrl_sid);
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream Begin %d", __FUNCTION__, tmp);
       break;
 
     case 1:

@@ -305,7 +305,6 @@ bool CRTMP::ReconnectStream(int bufferTime, double seekTime) {
   SendCreateStream(2.0);
 
   SetBufferMS(bufferTime);
-  UpdateBufferMS();
 
   return ConnectStream(seekTime);
 }
@@ -826,6 +825,8 @@ bool CRTMP::SendCheckBW()
 bool CRTMP::SendCheckBWResult()
 {
   RTMPPacket packet;
+  bool res;
+
   packet.m_nChannel = 0x03;   // control channel (invoke)
   packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
   packet.m_packetType = 0x14; // INVOKE
@@ -841,7 +842,9 @@ bool CRTMP::SendCheckBWResult()
 
   packet.m_nBodySize = enc - packet.m_body;
 
-  return SendRTMP(packet);
+  res = SendRTMP(packet);
+  m_methodCalls.erase(m_methodCalls.end());
+  return res;
 }
 
 bool CRTMP::SendPlay()
@@ -1037,9 +1040,13 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     }
 
     if (code == "NetStream.Play.Start") {
+      std::vector<std::string>::iterator i; //remote method calls queue
       m_bPlaying = true;
-      if (m_methodCalls[0] == "play")
-        m_methodCalls.erase(m_methodCalls.begin());
+      for (i=m_methodCalls.begin(); i<m_methodCalls.end(); i++)
+        if (i[0] == "play") {
+          m_methodCalls.erase(i);
+          break;
+        }
     }
 
     // Return 1 if this is a Play.Complete or Play.Stop
@@ -1195,15 +1202,45 @@ void CRTMP::HandleVideo(const RTMPPacket &packet)
 void CRTMP::HandlePing(const RTMPPacket &packet)
 {
   short nType = -1;
+  unsigned int tmp;
   if (packet.m_body && packet.m_nBodySize >= 2)
     nType = ReadInt16(packet.m_body);
   Log(LOGDEBUG, "%s, received ping. type: %d, len: %d", __FUNCTION__, nType, packet.m_nBodySize);
   //LogHex(packet.m_body, packet.m_nBodySize);
 
-  if (nType == 0x06 && packet.m_nBodySize >= 6) // server ping. reply with pong.
-  {
-    unsigned int nTime = ReadInt32(packet.m_body + 2);
-    SendPing(0x07, nTime);
+  if (packet.m_nBodySize >= 6) {
+    switch(nType) {
+    case 0:
+      m_ctrl_sid = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream Begin %d", __FUNCTION__, m_ctrl_sid);
+      break;
+
+    case 1:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream EOF %d", __FUNCTION__, tmp);
+      break;
+
+    case 2:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream Dry %d", __FUNCTION__, tmp);
+      break;
+
+    case 4:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream IsRecorded %d", __FUNCTION__, tmp);
+      break;
+
+    default:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream xx %d", __FUNCTION__, tmp);
+      break;
+
+    case 6: // server ping. reply with pong.
+      unsigned int nTime = ReadInt32(packet.m_body + 2);
+      SendPing(0x07, nTime);
+      break;
+    }
+
   }
 
   if (nType == 0x1A) {
@@ -1702,7 +1739,8 @@ again:
     else
     {
       int sockerr = GetSockError();
-      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, sockerr);
+      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d (%s)", __FUNCTION__, nBytes,
+         sockerr, strerror(sockerr));
       if (sockerr == EINTR && !bCtrlC)
         goto again;
 

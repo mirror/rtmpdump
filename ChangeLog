@@ -1,5 +1,24 @@
 RTMPDump
 Copyright 2008-2009 Andrej Stepanchuk; Distributed under the GPL v2
+Copyright 2009 Howard Chu
+
+30 October 2009, v1.7
+
+- added --subscribe option for subscribing to a stream
+- added --start / --stop options for specifying endpoints of a stream
+- added --debug / --quiet / --verbose options for controlling output
+
+- restructured to support auto-restart of timed-out streams
+
+- rewritten byteswapping, works on all platforms
+
+- fixed errors in command / result parsing
+
+- support functions rewritten in C to avoid g++ compiler bugs on ARM
+
+- support for 65600 channels instead of just 64
+
+- fixed signature buffer overruns
 
 17 May 2009, v1.6
 

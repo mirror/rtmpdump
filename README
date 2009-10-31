@@ -8,11 +8,7 @@ To compile just type
   $ make rtmpdump
   $ make streams
 
-or to cross compile
-
- $ make -f MakefileWIN32 rtmpdump 
- $ make -f MakefileARM rtmpdump
- $ make -f MakefileARM streams
+To cross compile you will need to edit the Makefile first.
 
 To download an rtmp stream use
 

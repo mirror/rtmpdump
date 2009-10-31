@@ -893,7 +893,7 @@ int main(int argc, char **argv)
 	}
 
  	LogPrintf("RTMPDump %s\n", RTMPDUMP_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
+	LogPrintf("(c) 2009 Andrej Stepanchuk, Howard Chu; license: GPL\n\n");
 
 	int opt;
 	struct option longopts[] = {

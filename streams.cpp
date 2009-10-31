@@ -625,9 +625,7 @@ void processTCPrequest
 
         Log(LOGDEBUG, "Setting buffer time to: %dms", req.bufferTime);
         rtmp->SetBufferMS(req.bufferTime);
-
-	LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
-        if (!rtmp->Connect(
+        rtmp->SetupStream(
 			req.protocol, 
 			req.hostname, 
 			req.rtmpport, 
@@ -643,7 +641,10 @@ void processTCPrequest
 			req.subscribepath, 
 			dSeek, 
 			req.bLiveStream, 
-			req.timeout)) {
+			req.timeout);
+
+	LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
+        if (!rtmp->Connect()) {
                 LogPrintf("%s, failed to connect!\n", __FUNCTION__);
         }
     	else 

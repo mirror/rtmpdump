@@ -1,5 +1,6 @@
 /*  RTMPDump
  *  Copyright (C) 2008-2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -28,6 +29,8 @@
 
 extern int debuglevel;
 
+static int neednl;
+
 FILE *fmsg;
 
 void LogSetOutput(FILE *file)
@@ -48,10 +51,35 @@ void LogPrintf(const char *format, ...)
 
 	if ( !fmsg ) fmsg = stderr;
 
+	if (neednl) {
+		putc('\n', fmsg);
+		neednl = 0;
+	}
+
 	fprintf(fmsg, "%s", str);
 #ifdef _DEBUG
 	fflush(fmsg);
 #endif
+}
+
+void LogStatus(const char *format, ...)
+{
+	char str[MAX_PRINT_LEN]="";
+	va_list args;
+	va_start(args, format);
+	vsnprintf(str, MAX_PRINT_LEN-1, format, args);
+	va_end(args);
+
+	if ( debuglevel==LOGCRIT )
+		return;
+
+	if ( !fmsg ) fmsg = stderr;
+
+	fprintf(fmsg, "%s", str);
+#ifdef _DEBUG
+	fflush(fmsg);
+#endif
+	neednl = 1;
 }
 
 void Log(int level, const char *format, ...)
@@ -68,13 +96,18 @@ void Log(int level, const char *format, ...)
 
 	if ( !fmsg ) fmsg = stderr;
 
-	if ( level <= debuglevel )
+	if ( level <= debuglevel ) {
+		if (neednl) {
+			putc('\n', fmsg);
+			neednl = 0;
+		}
 		fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?
 "ERROR":(level==LOGWARNING?"WARNING":(level==LOGCRIT?"CRIT":"INFO"))), str);
 
 #ifdef _DEBUG
-	fflush(fmsg);
+		fflush(fmsg);
 #endif
+	}
 }
 
 void LogHex(int level, const char *data, unsigned long len)

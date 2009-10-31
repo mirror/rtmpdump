@@ -1,5 +1,6 @@
 /*  RTMPDump
  *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -38,7 +39,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.6"
+#define RTMPDUMP_VERSION	"v1.7"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -778,13 +779,13 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 				*percent = round(*percent*10.0)/10.0;
 				now = GetTime();
 				if (abs(now - lastUpdate) > 200) {
-					LogPrintf("\r%.3f kB (%.1f%%)", (double)size/1024.0, *percent);
+					LogStatus("\r%.3f kB (%.1f%%)", (double)size/1024.0, *percent);
 					lastUpdate = now;
 				}
 			} else {
 				now = GetTime();
 				if (abs(now - lastUpdate) > 200) {
-					LogPrintf("\r%.3f kB", (double)size/1024.0);
+					LogStatus("\r%.3f kB", (double)size/1024.0);
 					lastUpdate = now;
 				}
 			}
@@ -795,7 +796,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 
                // Force clean close if a specified stop offset is reached
                 if (dStopOffset && timestamp >= dStopOffset) {
-                        LogPrintf("\nStop offset has been reached at %.2f seconds\n", (double)dStopOffset/1000.0);
+                        LogPrintf("Stop offset has been reached at %.2f seconds\n", (double)dStopOffset/1000.0);
                         nRead = 0;
                         rtmp->Close();
                 }
@@ -1303,9 +1304,9 @@ int main(int argc, char **argv)
 	}
 
 	if (nStatus == RD_SUCCESS) {
-		LogPrintf("\nDownload complete\n");
+		LogPrintf("Download complete\n");
 	} else if (nStatus == RD_INCOMPLETE)  {
-		LogPrintf("\nDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+		LogPrintf("Download may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
 	}
 
 clean:

@@ -121,7 +121,7 @@ void CRTMP::SetBufferMS(int size)
 
 void CRTMP::UpdateBufferMS()
 {
-  SendPing(3, 1, m_nBufferMS);
+  SendPing(3, m_stream_id, m_nBufferMS);
 }
 
 void CRTMP::SetupStream(
@@ -990,7 +990,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 	SendSeek(Link.seekTime);
       }*/
 	
-      SendPing(3, 1, m_nBufferMS);
+      SendPing(3, m_stream_id, m_nBufferMS);
     }
     else if (CSCMP(methodInvoked,"play"))
     {

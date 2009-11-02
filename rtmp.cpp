@@ -129,6 +129,7 @@ void CRTMP::SetupStream(
 	int protocol, 
 	const char *hostname, 
 	unsigned int port, 
+        const char *sockshost,
 	const char *playpath, 
 	const char *tcUrl, 
 	const char *swfUrl, 
@@ -182,6 +183,20 @@ void CRTMP::SetupStream(
 	Link.SWFSize = 0;
   }
 
+  if(sockshost)
+  {
+    const char *socksport = strchr(sockshost, ':');
+
+    Link.sockshost = strndup(sockshost,
+        socksport ? socksport - sockshost : strlen(sockshost));
+    Link.socksport = socksport ? atoi(socksport + 1) : 1080;
+    Log(LOGDEBUG, "Connecting via SOCKS proxy: %s:%d", Link.sockshost, Link.socksport);
+  } else {
+    Link.sockshost = NULL;
+    Link.socksport = 0;
+  }
+
+
   Link.tcUrl = tcUrl;
   Link.swfUrl = swfUrl;
   Link.pageUrl = pageUrl;
@@ -202,6 +217,24 @@ void CRTMP::SetupStream(
     Link.port = 1935;
 }
 
+static bool add_addr_info(sockaddr_in* service, const char *hostname, int port)
+{
+  service->sin_addr.s_addr = inet_addr(hostname);
+  if (service->sin_addr.s_addr == INADDR_NONE)
+  {
+    struct hostent *host = gethostbyname(hostname);
+    if (host == NULL || host->h_addr == NULL)
+    {
+      Log(LOGERROR, "Problem accessing the DNS. (addr: %s)", hostname);
+      return false;
+    }
+    service->sin_addr = *(struct in_addr*)host->h_addr;
+  }
+
+  service->sin_port = htons(port);
+  return true;
+}
+
 bool CRTMP::Connect() {
   if (!Link.hostname)
      return false;
@@ -215,19 +248,16 @@ bool CRTMP::Connect() {
   sockaddr_in service;
   memset(&service, 0, sizeof(sockaddr_in));
   service.sin_family = AF_INET;
-  service.sin_addr.s_addr = inet_addr(Link.hostname);
-  if (service.sin_addr.s_addr == INADDR_NONE)
+
+  if (Link.socksport)
   {
-    struct hostent *host = gethostbyname(Link.hostname);
-    if (host == NULL || host->h_addr == NULL)
-    {
-      Log(LOGERROR, "Problem accessing the DNS. (addr: %s)", Link.hostname);
-      return false;
-    }
-    service.sin_addr = *(struct in_addr*)host->h_addr;
+    // Connect via SOCKS
+    if(!add_addr_info(&service, Link.sockshost, Link.socksport)) return false;
+  } else {
+    // Connect directly
+    if(!add_addr_info(&service, Link.hostname, Link.port)) return false;
   }
 
-  service.sin_port = htons(Link.port);
   m_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (m_socket != -1)
   {
@@ -238,6 +268,16 @@ bool CRTMP::Connect() {
 	err, strerror(err));
       Close();
       return false;
+    }
+
+    if(Link.socksport) {
+      Log(LOGDEBUG, "%s ... SOCKS negotiation", __FUNCTION__);
+      if (!SocksNegotiate())
+      {
+        Log(LOGERROR, "%s, SOCKS negotiation failed.", __FUNCTION__);
+        Close();
+        return false;
+      }
     }
 
     Log(LOGDEBUG, "%s, ... connected, handshaking", __FUNCTION__);
@@ -272,6 +312,35 @@ bool CRTMP::Connect() {
   int on = 1;
   setsockopt(m_socket, IPPROTO_TCP, TCP_NODELAY, &on, sizeof(on));
   return true;
+}
+
+bool CRTMP::SocksNegotiate() {
+  char packet[255];
+  sockaddr_in service;
+  memset(&service, 0, sizeof(sockaddr_in));
+
+  add_addr_info(&service, Link.hostname, Link.port);
+  unsigned long addr = htonl(service.sin_addr.s_addr);
+
+  int len = snprintf(packet, sizeof packet, "%c%c%c%c%c%c%c%c%c",
+      4, 1, // SOCKS 4, connect
+      (Link.port  >> 8) & 0xFF,
+      (Link.port) & 0xFF,
+      (char) (addr >> 24) & 0xFF, (char) (addr >> 16) & 0xFF,
+      (char) (addr >> 8)  & 0xFF, (char) addr & 0xFF,
+      0); // NULL terminate
+
+  WriteN(packet, len);
+
+  if(ReadN(packet, 8) != 8)
+    return false;
+
+  if(packet[0] == 0 && packet[1] == 90) {
+    return true;
+  } else {
+    Log(LOGERROR, "%s, SOCKS returned error code %d", packet[1]);
+    return false;
+  }
 }
 
 bool CRTMP::ConnectStream(double seekTime) {

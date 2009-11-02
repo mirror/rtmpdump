@@ -874,6 +874,7 @@ int main(int argc, char **argv)
 	char *swfHash = 0;
 	uint32_t swfSize = 0;
 	char *flashVer = 0;
+        char *sockshost = 0;
 
 	char *flvFile = 0;
 
@@ -900,6 +901,7 @@ int main(int argc, char **argv)
 		{"help",    0, NULL, 'h'},
 		{"host",    1, NULL, 'n'},
 		{"port",    1, NULL, 'c'},
+		{"socks",   1, NULL, 'S'},
 		{"protocol",1, NULL, 'l'},
 		{"playpath",1, NULL, 'y'},
 		{"rtmp",    1, NULL, 'r'},
@@ -926,7 +928,7 @@ int main(int argc, char **argv)
 		{0,0,0,0}
 	};
 
-	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:w:x:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:w:x:S:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");
@@ -934,6 +936,7 @@ int main(int argc, char **argv)
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
+				LogPrintf("--socks|-S host:port    Use the specified SOCKS proxy\n");
 				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP, 3 - RTMPE)\n");
 				LogPrintf("--playpath|-y           Overrides the playpath parsed from rtmp url\n");
 				LogPrintf("--swfUrl|-s url         URL to player swf file\n");
@@ -1095,6 +1098,9 @@ int main(int argc, char **argv)
 			case 'z':
 				debuglevel = LOGALL;
 				break;
+                        case 'S':
+                                sockshost = optarg;
+				break;
 			default:
 				LogPrintf("unknown option: %c\n", opt);
 				break;
@@ -1177,7 +1183,7 @@ int main(int argc, char **argv)
 	memset(buffer, 0, bufferSize);
 
 	CRTMP  *rtmp = new CRTMP();
-	rtmp->SetupStream(protocol, hostname, port, playpath, tcUrl, swfUrl,
+	rtmp->SetupStream(protocol, hostname, port, sockshost, playpath, tcUrl, swfUrl,
 		pageUrl, app, auth, swfHash, swfSize, flashVer, subscribepath,
 		dSeek, bLiveStream, timeout);
 

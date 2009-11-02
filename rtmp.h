@@ -99,7 +99,10 @@ typedef struct
 
 	//char SWFHashHMAC[32];
 	char SWFVerificationResponse[42];
-	#endif	
+	#endif
+
+        const char *sockshost;
+        unsigned short socksport;
 } LNK;
 
 class CRTMP
@@ -116,6 +119,7 @@ class CRTMP
       	int protocol, 
 	const char *hostname, 
 	unsigned int port, 
+        const char *sockshost,
 	const char *playpath, 
 	const char *tcUrl, 
 	const char *swfUrl, 
@@ -164,6 +168,7 @@ class CRTMP
     protected:
       bool HandShake(bool FP9HandShake=true);
       bool RTMPConnect();
+      bool SocksNegotiate();
 
       bool SendConnectPacket();
       bool SendServerBW();

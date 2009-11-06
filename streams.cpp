@@ -641,6 +641,7 @@ void processTCPrequest
 			req.flashVer, 
 			req.subscribepath, 
 			dSeek, 
+			-1,	// length
 			req.bLiveStream, 
 			req.timeout);
 

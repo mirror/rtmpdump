@@ -141,6 +141,7 @@ void CRTMP::SetupStream(
 	const char *flashVer, 
 	const char *subscribepath, 
 	double dTime,
+	uint32_t dLength,
 	bool bLiveStream,
 	long int timeout
 )
@@ -167,7 +168,9 @@ void CRTMP::SetupStream(
   if(flashVer)
   	Log(LOGDEBUG, "flashVer : %s", flashVer);
   if(dTime > 0)
-  	Log(LOGDEBUG, "SeekTime : %lf", dTime);
+  	Log(LOGDEBUG, "SeekTime      : %.3f sec", (double)dTime/1000.0);
+  if(dLength > 0)
+  	Log(LOGDEBUG, "playLength    : %.3f sec", (double)dLength/1000.0);
 
   Log(LOGDEBUG,       "live     : %s", bLiveStream ? "yes":"no");
   Log(LOGDEBUG,       "timeout  : %d sec", timeout);
@@ -208,6 +211,7 @@ void CRTMP::SetupStream(
   Link.flashVer = flashVer;
   Link.subscribepath = subscribepath;
   Link.seekTime = dTime;
+  Link.length = dLength;
   Link.bLiveStream = bLiveStream;
   Link.timeout = timeout;
 
@@ -345,9 +349,12 @@ bool CRTMP::SocksNegotiate() {
   }
 }
 
-bool CRTMP::ConnectStream(double seekTime) {
+bool CRTMP::ConnectStream(double seekTime, uint32_t dLength) {
   if (seekTime >= -2.0)
     Link.seekTime = seekTime;
+
+  if (dLength >= 0)
+    Link.length = dLength;
 
   RTMPPacket packet;
   while (!m_bPlaying && IsConnected() && ReadPacket(packet)) {
@@ -371,14 +378,14 @@ bool CRTMP::ConnectStream(double seekTime) {
   return m_bPlaying;
 }
 
-bool CRTMP::ReconnectStream(int bufferTime, double seekTime) {
+bool CRTMP::ReconnectStream(int bufferTime, double seekTime, uint32_t dLength) {
   DeleteStream();
 
   SendCreateStream(2.0);
 
   SetBufferMS(bufferTime);
 
-  return ConnectStream(seekTime);
+  return ConnectStream(seekTime, dLength);
 }
 
 void CRTMP::DeleteStream() {
@@ -934,7 +941,7 @@ bool CRTMP::SendPlay()
   *enc = 0x05; // NULL
   enc++;
 
-  Log(LOGDEBUG, "%s, sending play: %s", __FUNCTION__, Link.playpath);
+  Log(LOGDEBUG, "%s, seekTime=%.2f, dLength=%d, sending play: %s", __FUNCTION__, Link.seekTime, Link.length, Link.playpath);
   enc += EncodeString(enc, Link.playpath);
 
   // Optional parameters start and len.
@@ -943,14 +950,22 @@ bool CRTMP::SendPlay()
   //  -2: looks for a live stream, then a recorded stream, if not found any open a live stream
   //  -1: plays a live stream
   // >=0: plays a recorded streams from 'start' milliseconds
+  if(Link.bLiveStream)
+    enc += EncodeNumber(enc, -1000.0);
+  else {
   if(Link.seekTime > 0.0)
     enc += EncodeNumber(enc, Link.seekTime); // resume from here
+    else
+      enc += EncodeNumber(enc, 0.0);//-2000.0); // recorded as default, -2000.0 is not reliable since that freezes the player if the stream is not found
+  }
   
   // len: -1, 0, positive number
   //  -1: plays live or recorded stream to the end (default)
   //   0: plays a frame 'start' ms away from the beginning
   //  >0: plays a live or recoded stream for 'len' milliseconds
   //enc += EncodeNumber(enc, -1.0); // len
+  if(Link.length)
+    enc += EncodeNumber(enc, Link.length); // len
 
   packet.m_nBodySize = enc - packet.m_body;
 
@@ -1009,6 +1024,7 @@ bool CRTMP::SendPing(short nType, unsigned int nObject, unsigned int nTime)
   return SendRTMP(packet);
 }
 
+// Returns 0 for OK/Failed/error, 1 for 'Stop or Complete'
 int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 {
   if (body[0] != 0x02) // make sure it is a string method name we start with

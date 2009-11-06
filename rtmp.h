@@ -88,6 +88,7 @@ typedef struct
 	const char *subscribepath;
 
 	double seekTime;
+	uint32_t length;
 	bool bLiveStream;
 
 	long int timeout; // number of seconds before connection times out
@@ -131,6 +132,7 @@ class CRTMP
 	const char *flashVer, 
 	const char *subscribepath, 
       	double dTime,
+      	uint32_t dLength,
 	bool bLiveStream,
 	long int timeout=300);
 
@@ -140,8 +142,8 @@ class CRTMP
       bool IsTimedout(); 
       double GetDuration();
 
-      bool ConnectStream(double seekTime=-10.0);
-      bool ReconnectStream(int bufferTime, double seekTime=-10.0);
+      bool ConnectStream(double seekTime=-10.0, uint32_t dLength=0);
+      bool ReconnectStream(int bufferTime, double seekTime=-10.0, uint32_t dLength=0);
       void DeleteStream();
       int GetNextMediaPacket(RTMPPacket &packet);
 

@@ -65,8 +65,8 @@ typedef unsigned long long int uint64_t;
 #endif
 
 // define default endianness
-#ifndef __LITTLE_EDNIAN
-#define __LITTLE_EDNIAN	1234
+#ifndef __LITTLE_ENDIAN
+#define __LITTLE_ENDIAN	1234
 #endif
 
 #ifndef __BIG_ENDIAN

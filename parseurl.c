@@ -257,61 +257,77 @@ parsehost:
 	p += appnamelen; 
 	iEnd -= appnamelen;
 
-	// parse playpath
-	int iPlaypathPos = -1;
-	int iPlaypathLen = -1;
-
-	int bAddMP4 = 0; // used to add at the end mp4: in front of the playpath
-
-	// here filter out semicolon added parameters, e.g. slist=bla...;abc=def
-	//if((temp=strstr(p, ";"))!=0)
-	//	iEnd = temp-p-1;
-	
-	if(*p=='?' && (temp=strstr(p, "slist="))!=0) {
-		iPlaypathPos = temp-p+6;
-
-		int iAnd = iEnd+1;
-		if((temp=strstr(p+iPlaypathPos, "&"))!=0)
-			iAnd = temp-p;
-		if(iAnd < iEnd)
-			iPlaypathLen = iAnd-iPlaypathPos;
-		else
-			iPlaypathLen = iEnd-iPlaypathPos; // +1
-	} else { // no slist parameter, so take string after applen 
-		if(iEnd > 0) {
-			iPlaypathPos = 1;
-			iPlaypathLen = iEnd-iPlaypathPos;//+1;
-			
-			// filter .flv from playpath specified with slashes: rtmp://host/app/path.flv
-			if(iPlaypathLen >=4) {
-				if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".f4v", 4)==0 || strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".mp4", 4)==0) {
-					bAddMP4 = 1;
-				} else if(strncmp(&p[iPlaypathPos+iPlaypathLen-4], ".flv", 4)==0) {
-					iPlaypathLen-=4;
-				}
-			}
-		} else {
-			Log(LOGERROR, "No playpath found!");
-		}
+	if (*p == '/') {
+		p += 1;
+		iEnd -= 1;
 	}
 
-	if(iPlaypathLen > -1) {
-		*playpath = (char *)malloc((iPlaypathLen+(bAddMP4?4:0)+1)*sizeof(char));
-		char *playpathptr = *playpath;
-
-		if(bAddMP4 && strncmp(&p[iPlaypathPos], "mp4:", 4)!=0) {
-			strcpy(playpathptr, "mp4:");
-			playpathptr+=4;
-		}
-
-		strncpy(playpathptr, &p[iPlaypathPos], iPlaypathLen);
-		playpathptr[iPlaypathLen]=0;
-
-		Log(LOGDEBUG, "Parsed playpath: %s", *playpath);
-	} else {
-		Log(LOGWARNING, "No playpath in URL!");
-	}
+	*playpath = ParsePlaypath(p);
 
         return 1;
 }
 
+/*
+ * Extracts playpath from RTMP URL. playpath is the file part of the
+ * URL, i.e. the part that comes after rtmp://host:port/app/
+ *
+ * Returns the stream name in a format understood by FMS. The name is
+ * the playpath part of the URL with formating depending on the stream
+ * type:
+ *
+ * mp4 streams: prepend "mp4:"
+ * mp3 streams: prepend "mp3:", remove extension
+ * flv streams: remove extension
+ */
+char *ParsePlaypath(const char *playpath) {
+	if (!playpath || !*playpath)
+		return NULL;
+
+	int addMP4 = 0;
+	int addMP3 = 0;
+	const char *temp;
+	const char *ppstart = playpath;
+	int pplen = strlen(playpath);
+
+	if ((*ppstart == '?') &&
+	    (temp=strstr(ppstart, "slist=")) != 0) {
+		ppstart = temp+6;
+		pplen = strlen(ppstart);
+
+		temp = strchr(ppstart, '&');
+		if (temp) {
+			pplen = temp-ppstart;
+		}
+	}
+
+	if (pplen >= 4) {
+		const char *ext = &ppstart[pplen-4];
+		if ((strcmp(ext, ".f4v") == 0) ||
+		    (strcmp(ext, ".mp4") == 0)) {
+			addMP4 = 1;
+		} else if (strcmp(ext, ".flv") == 0) {
+			pplen -= 4;
+		} else if (strcmp(ext, ".mp3") == 0) {
+			addMP3 = 1;
+			pplen -= 4;
+		}
+	}
+
+	char *streamname = (char *)malloc((pplen+4+1)*sizeof(char));
+	if (!streamname)
+		return NULL;
+
+	char *destptr = streamname;
+	if (addMP4 && (strncmp(ppstart, "mp4:", 4) != 0)) {
+		strcpy(destptr, "mp4:");
+		destptr += 4;
+	} else if (addMP3 && (strncmp(ppstart, "mp3:", 4) != 0)) {
+		strcpy(destptr, "mp3:");
+		destptr += 4;
+	}
+
+	strncpy(destptr, ppstart, pplen);
+	destptr[pplen] = '\0';
+
+	return streamname;
+}

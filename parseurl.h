@@ -26,6 +26,7 @@ extern "C" {
 #endif
 int hex2bin(char *str, char **hex);
 int ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
+char *ParsePlaypath(const char *playpath);
 #ifdef __cplusplus
 }
 #endif

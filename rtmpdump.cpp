@@ -28,7 +28,12 @@
 
 #ifdef WIN32
 #include <winsock.h>
+#include <io.h>
+#define	SET_BINMODE(f)	setmode(fileno(f), O_BINARY)
+#else
+#define	SET_BINMODE(f)
 #endif
+
 
 #include "rtmp.h"
 #include "log.h"
@@ -1218,9 +1223,10 @@ int main(int argc, char **argv)
 	}
 
 	if (!file) {
-		if(bStdoutMode)
+		if(bStdoutMode) {
 			file = stdout;
-		else
+			SET_BINMODE(file);
+		} else
 		{
 			file = fopen(flvFile, "w+b");
 			if(file == 0) {

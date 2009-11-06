@@ -186,9 +186,12 @@ void CRTMP::SetupStream(
   if(sockshost)
   {
     const char *socksport = strchr(sockshost, ':');
+    char *hostname = strdup(sockshost);
 
-    Link.sockshost = strndup(sockshost,
-        socksport ? socksport - sockshost : strlen(sockshost));
+    if(socksport)
+      hostname[socksport - sockshost] = '\0';
+    Link.sockshost = hostname;
+
     Link.socksport = socksport ? atoi(socksport + 1) : 1080;
     Log(LOGDEBUG, "Connecting via SOCKS proxy: %s:%d", Link.sockshost, Link.socksport);
   } else {
@@ -315,22 +318,21 @@ bool CRTMP::Connect() {
 }
 
 bool CRTMP::SocksNegotiate() {
-  char packet[255];
   sockaddr_in service;
   memset(&service, 0, sizeof(sockaddr_in));
 
   add_addr_info(&service, Link.hostname, Link.port);
   unsigned long addr = htonl(service.sin_addr.s_addr);
 
-  int len = snprintf(packet, sizeof packet, "%c%c%c%c%c%c%c%c%c",
+  char packet[] = {
       4, 1, // SOCKS 4, connect
       (Link.port  >> 8) & 0xFF,
       (Link.port) & 0xFF,
       (char) (addr >> 24) & 0xFF, (char) (addr >> 16) & 0xFF,
       (char) (addr >> 8)  & 0xFF, (char) addr & 0xFF,
-      0); // NULL terminate
+      0}; // NULL terminate
 
-  WriteN(packet, len);
+  WriteN(packet, sizeof packet);
 
   if(ReadN(packet, 8) != 8)
     return false;

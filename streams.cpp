@@ -629,6 +629,7 @@ void processTCPrequest
 			req.protocol, 
 			req.hostname, 
 			req.rtmpport, 
+			NULL,	// sockshost
 			req.playpath, 
 			req.tcUrl, 
 			req.swfUrl, 

@@ -67,7 +67,7 @@ namespace RTMP_LIB
       virtual ~AMFObjectProperty();
 
       const std::string &GetPropName() const;
-      void SetPropName(const std::string strName);
+      void SetPropName(const std::string& strName);
 
       AMFDataType GetType() const;
 

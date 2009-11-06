@@ -72,7 +72,7 @@ const std::string &RTMP_LIB::AMFObjectProperty::GetPropName() const
   return m_strName;
 }
 
-void RTMP_LIB::AMFObjectProperty::SetPropName(const std::string strName)
+void RTMP_LIB::AMFObjectProperty::SetPropName(const std::string& strName)
 {
   m_strName = strName;
 }

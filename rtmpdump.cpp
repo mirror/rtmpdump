@@ -50,7 +50,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8"
+#define RTMPDUMP_VERSION	"v1.9"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -128,12 +128,14 @@ int WriteHeader(
 	return size;
 }
 
+// Returns -3 if Play.Close/Stop, -2 if fatal error, -1 if no more media packets, 0 if ignorable error, >0 if there is a media packet
 int WriteStream(
 		CRTMP* rtmp, 
 		char **buf,			// target pointer, maybe preallocated
 		unsigned int len, 		// length of buffer if preallocated
 		uint32_t *tsm, 			// pointer to timestamp, will contain timestamp of last video packet returned
 		bool bResume, 		        // resuming mode, will not write FLV header and compare metaHeader and first kexframe
+		bool bLiveStream, 		// live mode, will not report absolute timestamps
 		uint32_t nResumeTS,		// resume keyframe timestamp
 		char *metaHeader, 		// pointer to meta header (if bResume == TRUE)
 		uint32_t nMetaHeaderSize,	// length of meta header, if zero meta header check omitted (if bResume == TRUE)
@@ -425,13 +427,16 @@ stopKeyframeSearch:
 			//ptr += 4;
 		}
 
+		// In non-live this nTimeStamp can contain an absolute TS.
+		// Update ext timestamp with this absolute offset in non-live mode otherwise report the relative one
+		// LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, bLiveStream: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, bLiveStream);
 		if(tsm)
-			*tsm = nTimeStamp;
+ 			*tsm = bLiveStream ? packet.m_nTimeStamp : nTimeStamp;
 
-                // Return 0 if this was completed nicely with invoke message Play.Stop or Play.Complete
+                // Return -3 if this was completed nicely with invoke message Play.Stop or Play.Complete
                 if (rtnGetNextMediaPacket == 2) {
                         Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
-                        return 0;
+                        return -3;
                 }
 
 		return size;
@@ -716,6 +721,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 	     int nSkipKeyFrames,
 	     bool bStdoutMode,
 	     bool bLiveStream,
+	     bool bHashes,
 	     bool bOverrideBufferTime,
 	     uint32_t bufferTime,
 	     double *percent)                  // percentage downloaded [out]
@@ -727,29 +733,36 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 	char *buffer = (char *)malloc(bufferSize);
         int nRead = 0;
 	off_t size = ftello(file);
+	unsigned long lastPercent = 0;
 
 	memset(buffer, 0, bufferSize);
 
 	*percent = 0.0;
 
-	if(timestamp != 0) {
-		LogPrintf("Continuing at TS: %d ms\n", timestamp);
+	if(timestamp) {
+		Log(LOGDEBUG, "Continuing at TS: %d ms\n", timestamp);
 	}
 
-	// print initial status
-	// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
-	if( duration > 0 ) {
-		if  ((double)timestamp >= (double)duration*999.0 ) {
-			LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)timestamp/1000.0);
-			return RD_SUCCESS;
+	if(bLiveStream) {
+		LogPrintf("Starting Live Stream\n");
+	} else {
+		// print initial status
+		// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
+		if( duration > 0 ) {
+			if  ((double)timestamp >= (double)duration*999.0 ) {
+				LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)timestamp/1000.0);
+				return RD_SUCCESS;
+			} else {
+				*percent = ((double)timestamp) / (duration*1000.0)*100.0;
+				*percent = round(*percent*10.0)/10.0;
+				LogPrintf("%s download at: %.3f kB / %.3f sec (%.1f%%)\n",
+					bResume ? "Resuming":"Starting",
+					(double)size/1024.0, (double)timestamp/1000.0, *percent);
+			}
 		} else {
-			*percent = ((double)timestamp) / (duration*1000.0)*100.0;
-			*percent = round(*percent*10.0)/10.0;
-			LogPrintf("Starting download at: %.3f kB / %.3f sec (%.1f%%)\n", (double)size/1024.0, (double)timestamp/1000.0, *percent);
+			LogPrintf("%s download at: %.3f kB\n", bResume ? "Resuming":"Starting",(double)size/1024.0);
 		}
-        } else {
-		LogPrintf("Starting download at: %.3f kB\n", (double)size/1024.0);
-        }
+	}
 
 	if (dLength > 0)
 		LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
@@ -775,7 +788,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 	lastUpdate = now-1000;
 	do
 	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
 		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {
@@ -801,15 +814,25 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 				}
 				*percent = ((double)timestamp) / (duration*1000.0)*100.0;
 				*percent = round(*percent*10.0)/10.0;
-				now = GetTime();
-				if (abs(now - lastUpdate) > 200) {
-					LogStatus("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, *percent);
-					lastUpdate = now;
+				if (bHashes) {
+					if ( lastPercent + 1 <= *percent ) {
+						LogPrintf("#");
+						lastPercent = (unsigned long)*percent;
+					}
+				} else {
+					now = GetTime();
+					if (abs(now - lastUpdate) > 200) {
+						LogStatus("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, *percent);
+						lastUpdate = now;
+					}
 				}
 			} else {
 				now = GetTime();
 				if (abs(now - lastUpdate) > 200) {
-					LogStatus("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
+					if (bHashes)
+						LogPrintf("#");
+					else
+						LogStatus("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
 					lastUpdate = now;
 				}
 			}
@@ -820,6 +843,8 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 	free(buffer);
+
+	Log(LOGDEBUG, "WriteStream returned: %d", nRead);
 
 	if(bResume && nRead == -2) {
 		LogPrintf("Couldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
@@ -832,6 +857,10 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 		fseek(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
+
+	if(nRead == -3)
+		return RD_SUCCESS;
+
 	if((duration > 0 && *percent < 99.9) || bCtrlC || nRead < 0 || rtmp->IsTimedout()) {
 		return RD_INCOMPLETE;
 	}
@@ -877,6 +906,7 @@ int main(int argc, char **argv)
 	int port = -1;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
+	bool bHashes = false; // display byte counters not hashes by default
 
 	long int timeout = 120; // timeout connection after 120 seconds
 	uint32_t dStartOffset = 0; // seek position in non-live mode
@@ -932,8 +962,10 @@ int main(int argc, char **argv)
 		{"pageUrl", 1, NULL, 'p'},
 		{"app",     1, NULL, 'a'},
 		{"auth",    1, NULL, 'u'},
+#ifdef CRYPTO
 		{"swfhash", 1, NULL, 'w'},
 		{"swfsize", 1, NULL, 'x'},
+#endif
 		{"flashVer",1, NULL, 'f'},
 		{"live"	   ,0, NULL, 'v'},
 		{"flv",     1, NULL, 'o'},
@@ -944,6 +976,7 @@ int main(int argc, char **argv)
 		{"subscribe",1,NULL, 'd'},
 		{"start",   1, NULL, 'A'},
 		{"stop",    1, NULL, 'B'},
+		{"hashes",  0, NULL, '#'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
 		{"verbose", 0, NULL, 'V'},
@@ -965,8 +998,10 @@ int main(int argc, char **argv)
 				LogPrintf("--tcUrl|-t url          URL to played stream (default: \"rtmp://host[:port]/app\")\n");
 				LogPrintf("--pageUrl|-p url        Web URL of played programme\n");
 				LogPrintf("--app|-a app            Name of player used\n");
+#ifdef CRYPTO
 				LogPrintf("--swfhash|-w hexstring  SHA256 hash of the decompressed SWF file (32 bytes)\n");
 				LogPrintf("--swfsize|-x num        Size of the decompressed SWF file, required for SWFVerification\n");
+#endif
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
 				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live streams possible\n");
@@ -976,6 +1011,7 @@ int main(int argc, char **argv)
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
 				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
 				LogPrintf("--stop|-B num           Stop at num seconds into stream\n");
+				LogPrintf("--hashes|-#             Display progress with hashes, not with the byte counter\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
@@ -986,6 +1022,7 @@ int main(int argc, char **argv)
 				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
 				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
+#ifdef CRYPTO
 			case 'w':
 			{
 				int res = hex2bin(optarg, &swfHash);
@@ -1005,6 +1042,7 @@ int main(int argc, char **argv)
 				}
 				break;
 			}
+#endif
 			case 'k':
 				nSkipKeyFrames = atoi(optarg);
 				if(nSkipKeyFrames < 0) {
@@ -1108,6 +1146,9 @@ int main(int argc, char **argv)
 				break;
 			case 'B':
 				dStopOffset = int(atof(optarg)*1000.0);
+				break;
+			case '#':
+				bHashes = true;
 				break;
 			case 'q':
 				debuglevel = LOGCRIT;
@@ -1284,7 +1325,7 @@ int main(int argc, char **argv)
 
 			timestamp  = dSeek;
 			if(dSeek != 0) {
-				LogPrintf("Continuing at TS: %d ms\n", timestamp);
+				Log(LOGDEBUG, "Continuing at TS: %d ms\n", timestamp);
 			}
 
 			// User defined seek offset
@@ -1320,7 +1361,7 @@ int main(int argc, char **argv)
 		nStatus = Download(rtmp, file, dSeek, dLength, duration, bResume,
                            metaHeader, nMetaHeaderSize, initialFrame,
                            initialFrameType, nInitialFrameSize,
-                           nSkipKeyFrames, bStdoutMode, bLiveStream,
+                           nSkipKeyFrames, bStdoutMode, bLiveStream, bHashes,
                            bOverrideBufferTime, bufferTime, &percent);
 		free(initialFrame);
 		initialFrame = NULL;
@@ -1369,11 +1410,11 @@ int main(int argc, char **argv)
 	if (nStatus == RD_SUCCESS) {
 		LogPrintf("Download complete\n");
 	} else if (nStatus == RD_INCOMPLETE)  {
-		LogPrintf("Download may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+		LogPrintf("Download may be incomplete (downloaded about %.2f%%), try resuming\n", percent);
 	}
 
 clean:
-	LogPrintf("\rClosing connection.\n");
+	Log(LOGDEBUG, "Closing connection.\n");
 	rtmp->Close();
 	//LogPrintf("done!\n\n");
 

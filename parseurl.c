@@ -305,7 +305,9 @@ char *ParsePlaypath(const char *playpath) {
 		if ((strcmp(ext, ".f4v") == 0) ||
 		    (strcmp(ext, ".mp4") == 0)) {
 			addMP4 = 1;
-		} else if (strcmp(ext, ".flv") == 0) {
+		// Only remove .flv from rtmp URL, not slist params
+		} else if ((ppstart == playpath) &&
+		    (strcmp(ext, ".flv") == 0)) {
 			pplen -= 4;
 		} else if (strcmp(ext, ".mp3") == 0) {
 			addMP3 = 1;

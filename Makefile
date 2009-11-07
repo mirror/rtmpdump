@@ -1,24 +1,40 @@
-#CROSS_COMPILE=arm-angstrom-linux-gnueabi-
-#CROSS_COMPILE=mingw32-
 CC=$(CROSS_COMPILE)gcc
 CXX=$(CROSS_COMPILE)g++
 LD=$(CROSS_COMPILE)ld
 
-#STAGING=/OE/tmp/staging/armv7a-angstrom-linux-gnueabi
-#INC=-I$(STAGING)/usr/include
 OPT=-O2
-CFLAGS=-Wall $(INC) $(OPT)
-CXXFLAGS=-Wall $(INC) $(OPT)
-LDFLAGS=-Wall
-#LIBS=-lws2_32 -lwinmm -lcrypto -lgdi32
+CFLAGS=-Wall $(XCFLAGS) $(INC) $(OPT)
+CXXFLAGS=-Wall $(XCFLAGS) $(INC) $(OPT)
+LDFLAGS=-Wall $(XLDFLAGS)
 LIBS=-lcrypto
 THREADLIB=-lpthread
 SLIBS=$(THREADLIB) $(LIBS)
 
-#EXT=.exe
 EXT=
 
-all: rtmpdump
+all:
+	@echo 'use "make linux" for a native Linux build, or'
+	@echo '    "make osx"   for a native OSX build, or'
+	@echo '    "make mingw" for a MinGW32 build, or'
+	@echo '    "make cygwin" for a CygWin build, or'
+	@echo '    "make arm"   for a cross-compiled Linux ARM build'
+
+progs:	rtmpdump streams
+
+linux:
+	@$(MAKE) $(MAKEFLAGS) progs
+
+osx:
+	@$(MAKE) XCFLAGS="-arch ppc -arch i386" $(MAKEFLAGS) progs
+
+mingw:
+	@$(MAKE) CROSS_COMPILE=mingw32- LIBS="-lws2_32 -lwinmm -lcrypto -lgdi32" THREADLIB= EXT=.exe $(MAKEFLAGS) progs
+
+cygwin:
+	@$(MAKE) XCFLAGS=-static XLDFLAGS="-static-libgcc -static" EXT=.exe $(MAKEFLAGS) progs
+
+arm:
+	@$(MAKE) CROSS_COMPILE=armv7a-angstrom-linux-gnueabi- INC=-I/OE/tmp/staging/armv7a-angstrom-linux-gnueabi/usr/include $(MAKEFLAGS) progs
 
 clean:
 	rm -f *.o

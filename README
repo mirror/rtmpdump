@@ -1,14 +1,24 @@
-RTMP Dump v1.7
+RTMP Dump v1.9
 (C) 2009 Andrej Stepanchuk
 (C) 2009 Howard Chu
 License: GPLv2
 
-To compile just type
+To compile type "make" with your platform name, e.g.
 
-  $ make rtmpdump
-  $ make streams
+  $ make linux
 
-To cross compile you will need to edit the Makefile first.
+or osx, mingw, or cygwin.
+
+You can cross-compile for ARM using
+
+  $ make arm
+
+but you may need to override the CROSS_COMPILE and INC variables, e.g.
+
+  $ make arm CROSS_COMPILE=arm-none-linux- INC=-I/my/cross/includes
+
+Please read the Makefile to see what other make variables are used.
+
 
 To download an rtmp stream use
 

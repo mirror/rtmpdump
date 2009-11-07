@@ -1477,27 +1477,27 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
   return true;
 }
 
-short  CRTMP::ReadInt16(const char *data)
+unsigned short  CRTMP::ReadInt16(const char *data)
 {
   unsigned char *c = (unsigned char *)data;
-  short val;
+  unsigned short val;
   val = (c[0] << 8) | c[1];
   return val;
 }
 
-int  CRTMP::ReadInt24(const char *data)
+unsigned int  CRTMP::ReadInt24(const char *data)
 {
   unsigned char *c = (unsigned char *)data;
-  int val;
-  val = (data[0] << 16) | (c[1] << 8) | c[2];
+  unsigned int val;
+  val = (c[0] << 16) | (c[1] << 8) | c[2];
   return val;
 }
 
 // big-endian 32bit integer
-int  CRTMP::ReadInt32(const char *data)
+unsigned int  CRTMP::ReadInt32(const char *data)
 {
   unsigned char *c = (unsigned char *)data;
-  int val;
+  unsigned int val;
   val = (c[0] << 24) | (c[1] << 16) | (c[2] << 8) | c[3];
   return val;
 }

@@ -156,9 +156,9 @@ class CRTMP
       static int EncodeInt32(char *output, int nVal);
       static int EncodeBoolean(char *output,bool bVal);
 
-      static short ReadInt16(const char *data);
-      static int  ReadInt24(const char *data);
-      static int  ReadInt32(const char *data);
+      static unsigned short ReadInt16(const char *data);
+      static unsigned int  ReadInt24(const char *data);
+      static unsigned int  ReadInt32(const char *data);
       static std::string ReadString(const char *data);
       static bool ReadBool(const char *data);
       static double ReadNumber(const char *data);

@@ -706,7 +706,6 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 	     FILE *file,
 	     uint32_t dSeek, 
 	     uint32_t dLength, 
-	     uint32_t dStopOffset, 
 	     double duration, 
 	     bool bResume,
 	     char *metaHeader, 
@@ -819,13 +818,6 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 		else { Log(LOGDEBUG, "zero read!"); }
 #endif
 
-               // Force clean close if a specified stop offset is reached
-                if (dStopOffset && timestamp >= dStopOffset) {
-                        LogPrintf("Stop offset has been reached at %.2f seconds (ts=%d, so=%d)\n", (double)dStopOffset/1000.0, timestamp, dStopOffset);
-                        nRead = 0;
-                        rtmp->Close();
-                }
-
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 	free(buffer);
 
@@ -840,7 +832,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 		fseek(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
-	if((duration > 0 && *percent < 99.9 && dStopOffset <= 0) || bCtrlC || nRead < 0 || rtmp->IsTimedout()) {
+	if((duration > 0 && *percent < 99.9) || bCtrlC || nRead < 0 || rtmp->IsTimedout()) {
 		return RD_INCOMPLETE;
 	}
 
@@ -1284,6 +1276,7 @@ int main(int argc, char **argv)
 			LogPrintf("Connecting ...\n");
 
 			if (!rtmp->Connect()) {
+				nStatus = RD_FAILED;
 				break;
 			}
 
@@ -1311,23 +1304,25 @@ int main(int argc, char **argv)
 				dLength = dStopOffset - dSeek;
 
 				// Quit if start seek is past required stop offset
-				if(dSeek >= dStopOffset) {
+				if(dLength <= 0) {
 					LogPrintf("Already Completed\n");
-					return RD_SUCCESS;
+					nStatus = RD_SUCCESS;
+					break;
 				}
 			}
 
 			if (!rtmp->ConnectStream(dSeek, dLength)) {
+				nStatus = RD_FAILED;
 				break;
 			}
 		}
 
-		nStatus = Download(rtmp, file, dSeek, dLength, dStopOffset, duration, bResume,
+		nStatus = Download(rtmp, file, dSeek, dLength, duration, bResume,
                            metaHeader, nMetaHeaderSize, initialFrame,
                            initialFrameType, nInitialFrameSize,
                            nSkipKeyFrames, bStdoutMode, bLiveStream,
                            bOverrideBufferTime, bufferTime, &percent);
-        free(initialFrame);
+		free(initialFrame);
 		initialFrame = NULL;
 
 		/* If we succeeded, we're done. If writing to stdout
@@ -1369,14 +1364,6 @@ int main(int argc, char **argv)
 			}
 		}
 		bResume = true;
-	}
-
-	// If duration is available then assume the download is complete if > 99.9%
-	if (bLiveStream == false && dStopOffset <= 0) {
-		if (duration > 0 && percent > 99.9)
-			nStatus = RD_SUCCESS;
-		else
-			nStatus = RD_INCOMPLETE;
 	}
 
 	if (nStatus == RD_SUCCESS) {

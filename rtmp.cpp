@@ -884,6 +884,8 @@ bool CRTMP::SendBytesReceived()
 bool CRTMP::SendCheckBW()
 {
   RTMPPacket packet;
+  bool res;
+
   packet.m_nChannel = 0x03;   // control channel (invoke)
   packet.m_headerType = RTMP_PACKET_SIZE_LARGE;
   packet.m_packetType = 0x14; // INVOKE
@@ -898,7 +900,10 @@ bool CRTMP::SendCheckBW()
 
   packet.m_nBodySize = enc - packet.m_body;
 
-  return SendRTMP(packet);
+  res = SendRTMP(packet);
+  /* The result of this message is _onbwcheck, not _result */
+  m_methodCalls.erase(m_methodCalls.end());
+  return res;
 }
 
 bool CRTMP::SendCheckBWResult()

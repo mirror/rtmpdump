@@ -1259,7 +1259,6 @@ int main(int argc, char **argv)
 
 	off_t size = 0;
         uint32_t timestamp = 0;
-	int tries = 2;	/* 1 retry */
 
 	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
 	if(bResume) {
@@ -1306,9 +1305,7 @@ int main(int argc, char **argv)
 	netstackdump_read = fopen("netstackdump_read", "wb");
 #endif
 
-	while (tries > 0 && !bCtrlC) {
-		tries--;
-
+	while (!bCtrlC) {
 		Log(LOGDEBUG, "Setting buffer time to: %dms", bufferTime);
 		rtmp->SetBufferMS(bufferTime);
 
@@ -1356,6 +1353,41 @@ int main(int argc, char **argv)
 				nStatus = RD_FAILED;
 				break;
 			}
+		} else {
+			nInitialFrameSize = 0;
+
+			Log(LOGINFO, "Connection timed out, trying to reconnect.\n\n");
+        
+			nStatus = GetLastKeyframe(file, nSkipKeyFrames,
+						  &dSeek, &initialFrame,
+						  &initialFrameType,
+						  &nInitialFrameSize);
+			if (nStatus != RD_SUCCESS) {
+				Log(LOGDEBUG, "Failed to get last keyframe.");
+				break;
+			}
+
+			// Calculate the length of the stream to still play
+			if (dStopOffset > 0) {
+				dLength = dStopOffset - dSeek;
+
+				// Quit if start seek is past required stop offset
+				if(dLength <= 0) {
+					LogPrintf("Already Completed\n");
+					nStatus = RD_SUCCESS;
+					break;
+				}
+			}
+
+			if (!rtmp->ReconnectStream(bufferTime, dSeek, dLength)) {
+				Log(LOGERROR, "Failed to resume the stream\n\n");
+				if (!rtmp->IsTimedout())
+				  nStatus = RD_FAILED;
+				else
+				  nStatus = RD_INCOMPLETE;
+				break;
+			}
+			bResume = true;
 		}
 
 		nStatus = Download(rtmp, file, dSeek, dLength, duration, bResume,
@@ -1371,40 +1403,6 @@ int main(int argc, char **argv)
 		 */
 		if (nStatus != RD_INCOMPLETE || bStdoutMode || !rtmp->IsTimedout())
 			break;
-
-		nInitialFrameSize = 0;
-
-		Log(LOGINFO, "Connection timed out, trying to reconnect.\n\n");
-        
-		nStatus = GetLastKeyframe(file, nSkipKeyFrames,
-                                          &dSeek, &initialFrame,
-                                          &initialFrameType,
-                                          &nInitialFrameSize);
-		if (nStatus != RD_SUCCESS) {
-                        Log(LOGDEBUG, "Failed to get last keyframe.");
-                        break;
-		}
-
-		// Calculate the length of the stream to still play
-		if (dStopOffset > 0) {
-			dLength = dStopOffset - dSeek;
-
-			// Quit if start seek is past required stop offset
-			if(dLength <= 0) {
-				LogPrintf("Already Completed\n");
-				nStatus = RD_SUCCESS;
-				break;
-			}
-		}
-
-		if (!rtmp->ReconnectStream(bufferTime, dSeek, dLength)) {
-                        Log(LOGERROR, "Failed to resume the stream\n\n");
-			if (!rtmp->IsTimedout()) {
-                          nStatus = RD_FAILED;
-                          break;
-			}
-		}
-		bResume = true;
 	}
 
 	if (nStatus == RD_SUCCESS) {

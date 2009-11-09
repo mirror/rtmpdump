@@ -30,7 +30,7 @@
 #define RTMP_PACKET_TYPE_VIDEO 0x09
 #define RTMP_PACKET_TYPE_INFO  0x12
 
-#define RTMP_MAX_HEADER_SIZE 12
+#define RTMP_MAX_HEADER_SIZE 14
 
 typedef unsigned char BYTE;
 
@@ -66,6 +66,7 @@ namespace RTMP_LIB
       uint32_t	m_nBodySize;
       uint32_t	m_nBytesRead;
       char 	*m_body;
+      char 	*m_buffer;
   };
 };
 

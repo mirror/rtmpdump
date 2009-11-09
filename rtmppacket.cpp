@@ -50,13 +50,15 @@ void RTMPPacket::Reset()
   m_nBodySize = 0;
   m_nBytesRead = 0;
   m_body = NULL;
+  m_buffer = NULL;
 }
 
 bool RTMPPacket::AllocPacket(int nSize)
 {
-  m_body = (char *)calloc(1, nSize);
-  if (!m_body)
+  m_buffer = (char *)calloc(1, nSize+RTMP_MAX_HEADER_SIZE);
+  if (!m_buffer)
     return false;
+  m_body = m_buffer+RTMP_MAX_HEADER_SIZE;
   m_nBytesRead = 0;
   return true;
 }
@@ -69,8 +71,9 @@ void RTMPPacket::FreePacket()
 
 void RTMPPacket::FreePacketHeader()
 {
-  if (m_body)
-    free(m_body);
+  if (m_buffer)
+    free(m_buffer);
+  m_buffer = NULL;
   m_body = NULL;
 }
 

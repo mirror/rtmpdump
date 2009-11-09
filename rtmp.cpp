@@ -122,7 +122,7 @@ void CRTMP::SetBufferMS(int size)
 
 void CRTMP::UpdateBufferMS()
 {
-  SendPing(3, m_stream_id, m_nBufferMS);
+  SendCtrl(3, m_stream_id, m_nBufferMS);
 }
 
 void CRTMP::SetupStream(
@@ -441,8 +441,8 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
         break;
 
       case 0x04:
-        // ping
-        HandlePing(packet);
+        // ctrl
+        HandleCtrl(packet);
         break;
 
       case 0x05:
@@ -992,14 +992,14 @@ The type of Ping packet is 0x4 and contains two mandatory parameters and two opt
     * type 26: SWFVerification request
     * type 27: SWFVerification response
 */
-bool CRTMP::SendPing(short nType, unsigned int nObject, unsigned int nTime)
+bool CRTMP::SendCtrl(short nType, unsigned int nObject, unsigned int nTime)
 {
-  Log(LOGDEBUG, "sending ping. type: 0x%04x", (unsigned short)nType);
+  Log(LOGDEBUG, "sending ctrl. type: 0x%04x", (unsigned short)nType);
 
   RTMPPacket packet; 
   packet.m_nChannel = 0x02;   // control channel (ping)
   packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
-  packet.m_packetType = 0x04; // ping
+  packet.m_packetType = 0x04; // ctrl
   packet.m_nInfoField1 = GetTime();
 
   int nSize = (nType==0x03?10:6); // type 3 is the buffer time and requires all 3 parameters. all in all 10 bytes.
@@ -1062,7 +1062,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     if (CSCMP(methodInvoked,"connect"))
     {
       SendServerBW();
-      SendPing(3, 0, 300);
+      SendCtrl(3, 0, 300);
 
       SendCreateStream(2.0);
 
@@ -1083,7 +1083,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 	SendSeek(Link.seekTime);
       }*/
 	
-      SendPing(3, m_stream_id, m_nBufferMS);
+      SendCtrl(3, m_stream_id, m_nBufferMS);
     }
     else if (CSCMP(methodInvoked,"play"))
     {
@@ -1292,13 +1292,13 @@ void CRTMP::HandleVideo(const RTMPPacket &packet)
 {
 }
 
-void CRTMP::HandlePing(const RTMPPacket &packet)
+void CRTMP::HandleCtrl(const RTMPPacket &packet)
 {
   short nType = -1;
   unsigned int tmp;
   if (packet.m_body && packet.m_nBodySize >= 2)
     nType = ReadInt16(packet.m_body);
-  Log(LOGDEBUG, "%s, received ping. type: %d, len: %d", __FUNCTION__, nType, packet.m_nBodySize);
+  Log(LOGDEBUG, "%s, received ctrl. type: %d, len: %d", __FUNCTION__, nType, packet.m_nBodySize);
   //LogHex(packet.m_body, packet.m_nBodySize);
 
   if (packet.m_nBodySize >= 6) {
@@ -1323,14 +1323,25 @@ void CRTMP::HandlePing(const RTMPPacket &packet)
       Log(LOGDEBUG, "%s, Stream IsRecorded %d", __FUNCTION__, tmp);
       break;
 
+    case 6: // server ping. reply with pong.
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Ping %d", __FUNCTION__, tmp);
+      SendCtrl(0x07, tmp);
+      break;
+
+    case 31:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream BufferEmpty %d", __FUNCTION__, tmp);
+      break;
+
+    case 32:
+      tmp = ReadInt32(packet.m_body + 2);
+      Log(LOGDEBUG, "%s, Stream BufferReady %d", __FUNCTION__, tmp);
+      break;
+
     default:
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream xx %d", __FUNCTION__, tmp);
-      break;
-
-    case 6: // server ping. reply with pong.
-      unsigned int nTime = ReadInt32(packet.m_body + 2);
-      SendPing(0x07, nTime);
       break;
     }
 
@@ -1342,7 +1353,7 @@ void CRTMP::HandlePing(const RTMPPacket &packet)
 
 	// respond with HMAC SHA256 of decompressed SWF, key is the 30byte player key, also the last 30 bytes of the server handshake are applied
 	if(Link.SWFHash) {
-	  SendPing(0x1B, 0, 0);
+	  SendCtrl(0x1B, 0, 0);
 	} else {
 	  Log(LOGWARNING, "%s: Ignoring SWFVerification request, use --swfhash and --swfsize!", __FUNCTION__);
 	}
@@ -1473,11 +1484,14 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
     // reset the data from the stored packet. we keep the header since we may use it later if a new packet for this channel
     // arrives and requests to re-use some info (small packet header)
     m_vecChannelsIn[packet.m_nChannel]->m_body = NULL;
+    m_vecChannelsIn[packet.m_nChannel]->m_buffer = NULL;
     m_vecChannelsIn[packet.m_nChannel]->m_nBytesRead = 0;
     m_vecChannelsIn[packet.m_nChannel]->m_hasAbsTimestamp = false; // can only be false if we reuse header
   }
-  else
+  else {
     packet.m_body = NULL; // so it wont be erased on "free"
+    packet.m_buffer = NULL; // so it wont be erased on "free"
+  }
 
   return true;
 }
@@ -1721,7 +1735,8 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
   }
 
   int nSize = packetSize[packet.m_headerType];
-  char header[RTMP_LARGE_HEADER_SIZE] = { 0 };
+  int hSize = nSize;
+  char *header = packet.m_body - nSize;
   header[0] = (char)((packet.m_headerType << 6) | packet.m_nChannel);
   if (nSize > 1)
     EncodeInt24(header+1, packet.m_nInfoField1);
@@ -1735,26 +1750,23 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
   if (nSize > 8)
     EncodeInt32LE(header+8, packet.m_nInfoField2);
 
-#if 0
-  int on=1;
-  setsockopt(m_socket, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
-#endif
-  if (!WriteN(header, nSize))
-  {
-    Log(LOGWARNING, "%s: couldn't send rtmp header", __FUNCTION__);
-    return false;
-  }
-
   nSize = packet.m_nBodySize;
   char *buffer = packet.m_body;
 
   while (nSize)
   {
     int nChunkSize = packet.m_packetType == 0x14?m_chunkSize:packet.m_nBodySize;
+    int wrote;
     if (nSize < m_chunkSize)
       nChunkSize = nSize;
 
-    if (!WriteN(buffer, nChunkSize))
+    if (header) {
+      wrote=WriteN(header, nChunkSize+hSize);
+      header = NULL;
+    } else {
+      wrote=WriteN(buffer, nChunkSize);
+    }
+    if (!wrote)
       return false;
 
     nSize -= nChunkSize;
@@ -1762,16 +1774,10 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
 
     if (nSize > 0)
     {
-      char sep = (0xc0 | packet.m_nChannel);
-      if (!WriteN(&sep, 1))
-        return false;  
+      header = buffer-1;
+      hSize = 1;
+      *header = (0xc0 | packet.m_nChannel);
     }
-#if 0
-    if (on) {
-		on = 0;
-	  setsockopt(m_socket, IPPROTO_TCP, TCP_CORK, &on, sizeof(on));
-	}
-#endif
   }
 
   if (packet.m_packetType == 0x14) { // we invoked a remote method, keep it in call queue till result arrives
@@ -1783,6 +1789,7 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
     m_vecChannelsOut[packet.m_nChannel] = new RTMPPacket;
   *m_vecChannelsOut[packet.m_nChannel] = packet;
   m_vecChannelsOut[packet.m_nChannel]->m_body = NULL;
+  m_vecChannelsOut[packet.m_nChannel]->m_buffer = NULL;
   return true;
 }
 

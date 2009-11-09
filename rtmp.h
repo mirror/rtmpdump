@@ -176,7 +176,7 @@ class CRTMP
       bool SendServerBW();
       bool SendCheckBW();
       bool SendCheckBWResult();
-      bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
+      bool SendCtrl(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
       bool SendDeleteStream(double dStreamId);
@@ -191,7 +191,7 @@ class CRTMP
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);
       void HandleVideo(const RTMPPacket &packet);
-      void HandlePing(const RTMPPacket &packet);
+      void HandleCtrl(const RTMPPacket &packet);
       void HandleServerBW(const RTMPPacket &packet);
       void HandleClientBW(const RTMPPacket &packet);
      

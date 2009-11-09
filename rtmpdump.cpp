@@ -816,7 +816,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 				*percent = round(*percent*10.0)/10.0;
 				if (bHashes) {
 					if ( lastPercent + 1 <= *percent ) {
-						LogPrintf("#");
+						LogStatus("#");
 						lastPercent = (unsigned long)*percent;
 					}
 				} else {
@@ -830,7 +830,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 				now = GetTime();
 				if (abs(now - lastUpdate) > 200) {
 					if (bHashes)
-						LogPrintf("#");
+						LogStatus("#");
 					else
 						LogStatus("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
 					lastUpdate = now;

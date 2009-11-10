@@ -983,7 +983,7 @@ int main(int argc, char **argv)
 		{0,0,0,0}
 	};
 
-	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:b:f:o:u:n:c:l:y:m:k:d:A:B:w:x:S:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:b:f:o:u:n:c:l:y:m:k:d:A:B:w:x:S:#", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");

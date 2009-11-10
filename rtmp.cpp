@@ -420,6 +420,13 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
     if (!bHasMediaPacket) { 
       packet.FreePacket();
     }
+    if (m_bPausing == 3) {
+      if (packet.m_nTimeStamp <= m_pauseStamp) {
+	bHasMediaPacket = false;
+	continue;
+      }
+      m_bPausing = 0;
+    }
   }
         
   if (bHasMediaPacket)
@@ -1309,7 +1316,6 @@ void CRTMP::HandleCtrl(const RTMPPacket &packet)
     case 0:
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream Begin %d", __FUNCTION__, tmp);
-      m_bPausing = 0;
       break;
 
     case 1:
@@ -1339,10 +1345,11 @@ void CRTMP::HandleCtrl(const RTMPPacket &packet)
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream BufferEmpty %d", __FUNCTION__, tmp);
       if (!m_bPausing) {
-        SendPause(true, m_channelTimestamp[m_mediaChannel]);
+	m_pauseStamp = m_channelTimestamp[m_mediaChannel];
+        SendPause(true, m_pauseStamp);
         m_bPausing = 1;
       } else if (m_bPausing == 2) {
-        SendPause(false, m_channelTimestamp[m_mediaChannel]);
+        SendPause(false, m_pauseStamp);
         m_bPausing = 3;
       }
       break;

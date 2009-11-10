@@ -1472,10 +1472,14 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
   if (nSize == 11)
     packet.m_nInfoField2 = ReadInt32LE(header+7);
 
-  if (packet.m_nBodySize > 0 && packet.m_body == NULL && !packet.AllocPacket(packet.m_nBodySize))
+  bool didAlloc = false;
+  if (packet.m_nBodySize > 0 && packet.m_body == NULL)
   {
-    Log(LOGDEBUG, "%s, failed to allocate packet", __FUNCTION__);
-    return false;
+    if (!packet.AllocPacket(packet.m_nBodySize)) {
+      Log(LOGDEBUG, "%s, failed to allocate packet", __FUNCTION__);
+      return false;
+    }
+    didAlloc = true;
   }
 
   int nToRead = packet.m_nBodySize - packet.m_nBytesRead;
@@ -1486,8 +1490,10 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
   if (ReadN(packet.m_body + packet.m_nBytesRead, nChunk) != nChunk)
   {
     Log(LOGERROR, "%s, failed to read RTMP packet body. len: %lu", __FUNCTION__, packet.m_nBodySize);
-    packet.m_body = NULL; // we dont want it deleted since its pointed to from the stored packets (m_vecChannelsIn)
-    packet.m_buffer = NULL;
+    if (!didAlloc) {
+      packet.m_body = NULL; // we dont want it deleted since its pointed to from the stored packets (m_vecChannelsIn)
+      packet.m_buffer = NULL;
+    }
     return false;  
   }
 

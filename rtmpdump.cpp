@@ -1237,11 +1237,7 @@ int main(int argc, char **argv)
 		strcpy(tcUrl, str);
 	}
 
-	int bufferSize = 1024*1024;
-	char *buffer = (char *)malloc(bufferSize);
 	int first = 1;
-
-	memset(buffer, 0, bufferSize);
 
 	// User defined seek offset
 	if (dStartOffset > 0) {

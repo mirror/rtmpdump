@@ -20,12 +20,6 @@ but you may need to override the CROSS_COMPILE and INC variables, e.g.
 Please read the Makefile to see what other make variables are used.
 
 
-To download an rtmp stream use
-
-  $ ./get_iplayer --raw --force --get 1 --vmode flashhigh --rtmp --rtmpdump "./rtmpdump"
-
-rtmpdump still supports hulu if you can invoke it with a correct rtmp url.
-
 SWF Verification
 ----------------
 

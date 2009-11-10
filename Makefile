@@ -52,7 +52,7 @@ AMFObject.o: AMFObject.cpp AMFObject.h log.h rtmp.h Makefile
 rtmppacket.o: rtmppacket.cpp rtmppacket.h log.h Makefile
 rtmpdump.o: rtmpdump.cpp rtmp.h log.h AMFObject.h Makefile
 parseurl.o: parseurl.c parseurl.h log.h Makefile
-streams.o: streams.cpp log.h Makefile
+streams.o: streams.cpp rtmp.h log.h Makefile
 dh.o: dh.c dh.h log.h Makefile
-handshake.o: handshake.cpp log.h Makefile
+handshake.o: handshake.cpp rtmp.h log.h Makefile
 

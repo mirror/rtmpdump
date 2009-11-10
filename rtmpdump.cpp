@@ -1423,6 +1423,7 @@ clean:
 	if(netstackdump_read != 0)
                 fclose(netstackdump_read);	
 #endif
+	delete rtmp;
 	return nStatus;
 }
 

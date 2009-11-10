@@ -94,6 +94,11 @@ char RTMPProtocolStringsLower[][7] =
 
 CRTMP::CRTMP() : m_socket(0)
 {
+  for (int i=0; i<65600; i++)
+  {
+    m_vecChannelsIn[i] = NULL;
+    m_vecChannelsOut[i] = NULL;
+  }
   Close();
   m_pBuffer = new char[RTMP_BUFFER_CACHE_SIZE];
   m_nBufferMS = 300;
@@ -104,6 +109,7 @@ CRTMP::CRTMP() : m_socket(0)
   m_fVideoCodecs = 252.0;
   m_bTimedout = false;
   m_bPausing = 0;
+  m_mediaChannel = 0;
 }
 
 CRTMP::~CRTMP()
@@ -1481,6 +1487,7 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
   {
     Log(LOGERROR, "%s, failed to read RTMP packet body. len: %lu", __FUNCTION__, packet.m_nBodySize);
     packet.m_body = NULL; // we dont want it deleted since its pointed to from the stored packets (m_vecChannelsIn)
+    packet.m_buffer = NULL;
     return false;  
   }
 

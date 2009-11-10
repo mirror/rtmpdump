@@ -103,6 +103,7 @@ CRTMP::CRTMP() : m_socket(0)
   m_fAudioCodecs = 3191.0;
   m_fVideoCodecs = 252.0;
   m_bTimedout = false;
+  m_bPausing = 0;
 }
 
 CRTMP::~CRTMP()
@@ -250,6 +251,7 @@ bool CRTMP::Connect() {
   Close();
 
   m_bTimedout = false;
+  m_bPausing = 0;
   m_fDuration = 0.0;
 
   sockaddr_in service;
@@ -460,6 +462,8 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
         //Log(LOGDEBUG, "%s, received: audio %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleAudio(packet);
         bHasMediaPacket = 1;
+	if (!m_mediaChannel)
+	  m_mediaChannel = packet.m_nChannel;
         break;
 
       case 0x09:
@@ -467,6 +471,8 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
         //Log(LOGDEBUG, "%s, received: video %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleVideo(packet);
         bHasMediaPacket = 1;
+	if (!m_mediaChannel)
+	  m_mediaChannel = packet.m_nChannel;
         break;
 
       case 0x0F: // flex stream send
@@ -823,7 +829,7 @@ bool CRTMP::SendPause(bool DoPause, double dTime)
   *enc = 0x05; // NULL
   enc++;
   enc += EncodeBoolean(enc, DoPause);
-  enc += EncodeNumber(enc, (double)dTime/1000);
+  enc += EncodeNumber(enc, (double)dTime);
 
   packet.m_nBodySize = enc - packet.m_body;
 
@@ -1303,11 +1309,14 @@ void CRTMP::HandleCtrl(const RTMPPacket &packet)
     case 0:
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream Begin %d", __FUNCTION__, tmp);
+      m_bPausing = 0;
       break;
 
     case 1:
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream EOF %d", __FUNCTION__, tmp);
+      if (m_bPausing == 1)
+        m_bPausing = 2;
       break;
 
     case 2:
@@ -1329,6 +1338,13 @@ void CRTMP::HandleCtrl(const RTMPPacket &packet)
     case 31:
       tmp = ReadInt32(packet.m_body + 2);
       Log(LOGDEBUG, "%s, Stream BufferEmpty %d", __FUNCTION__, tmp);
+      if (!m_bPausing) {
+        SendPause(true, m_channelTimestamp[m_mediaChannel]);
+        m_bPausing = 1;
+      } else if (m_bPausing == 2) {
+        SendPause(false, m_channelTimestamp[m_mediaChannel]);
+        m_bPausing = 3;
+      }
       break;
 
     case 32:

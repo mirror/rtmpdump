@@ -216,7 +216,9 @@ class CRTMP
       bool m_bPlaying;
       int  m_nBufferMS;
       int  m_stream_id; // returned in _result from invoking createStream
+      int  m_mediaChannel;
       bool m_bTimedout;
+      int m_bPausing;
       int m_nClientBW;
       uint8_t m_nClientBW2;
       int m_nServerBW;

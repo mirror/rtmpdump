@@ -779,7 +779,7 @@ bool CRTMP::SendFCSubscribe(const char *subscribepath)
   Log(LOGDEBUG, "FCSubscribe: %s", subscribepath);
   char *enc = packet.m_body;
   enc += EncodeString(enc, "FCSubscribe");
-  enc += EncodeNumber(enc, 0);
+  enc += EncodeNumber(enc, 4);
   *enc = 0x05; // NULL
   enc++;
   enc += EncodeString(enc, subscribepath);
@@ -884,7 +884,6 @@ bool CRTMP::SendBytesReceived()
 bool CRTMP::SendCheckBW()
 {
   RTMPPacket packet;
-  bool res;
 
   packet.m_nChannel = 0x03;   // control channel (invoke)
   packet.m_headerType = RTMP_PACKET_SIZE_LARGE;
@@ -894,19 +893,16 @@ bool CRTMP::SendCheckBW()
   packet.AllocPacket(256); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "_checkbw");
-  enc += EncodeNumber(enc, 0x00);
+  enc += EncodeNumber(enc, 5);
   *enc = 0x05; // NULL
   enc++;
 
   packet.m_nBodySize = enc - packet.m_body;
 
-  res = SendRTMP(packet);
-  /* The result of this message is _onbwcheck, not _result */
-  m_methodCalls.erase(m_methodCalls.end());
-  return res;
+  return SendRTMP(packet);
 }
 
-bool CRTMP::SendCheckBWResult()
+bool CRTMP::SendCheckBWResult(int txn)
 {
   RTMPPacket packet;
   bool res;
@@ -919,7 +915,7 @@ bool CRTMP::SendCheckBWResult()
   packet.AllocPacket(256); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "_result");
-  enc += EncodeNumber(enc, (double)GetTime()); // temp
+  enc += EncodeNumber(enc, txn);
   *enc = 0x05; // NULL
   enc++;
   enc += EncodeNumber(enc, (double)m_nBWCheckCounter++); 
@@ -1048,6 +1044,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 
   obj.Dump();
   std::string method = obj.GetProperty(0).GetString();
+  int txn = obj.GetProperty(1).GetNumber();
   Log(LOGDEBUG, "%s, server invoking <%s>", __FUNCTION__, method.c_str());
 
 #define CSCMP(a,b)	(a.size() == (sizeof(b)-1)) && !strcmp(a.c_str(),b)
@@ -1107,7 +1104,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   }
   else if (CSCMP(method,"_onbwcheck"))
   {
-    SendCheckBWResult();
+    SendCheckBWResult(txn);
   }
   else if (CSCMP(method,"_error"))
   {

@@ -175,7 +175,7 @@ class CRTMP
       bool SendConnectPacket();
       bool SendServerBW();
       bool SendCheckBW();
-      bool SendCheckBWResult();
+      bool SendCheckBWResult(int txn);
       bool SendCtrl(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);

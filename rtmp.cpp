@@ -364,6 +364,7 @@ bool CRTMP::ConnectStream(double seekTime, uint32_t dLength) {
   if (dLength >= 0)
     Link.length = dLength;
 
+  m_mediaChannel = 0;
   RTMPPacket packet;
   while (!m_bPlaying && IsConnected() && ReadPacket(packet)) {
     if (!packet.IsReady())
@@ -437,6 +438,11 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
         
   if (bHasMediaPacket)
     m_bPlaying = true;
+/*
+  else if (m_bTimedout) {
+    m_pauseStamp = m_channelTimestamp[m_mediaChannel];
+    m_bPausing = 3;
+  } */
 
   return bHasMediaPacket;
 }
@@ -798,7 +804,7 @@ bool CRTMP::SendFCSubscribe(const char *subscribepath)
   Log(LOGDEBUG, "FCSubscribe: %s", subscribepath);
   char *enc = packet.m_body;
   enc += EncodeString(enc, "FCSubscribe");
-  enc += EncodeNumber(enc, 4);
+  enc += EncodeNumber(enc, 4.0);
   *enc = 0x05; // NULL
   enc++;
   enc += EncodeString(enc, subscribepath);
@@ -912,16 +918,17 @@ bool CRTMP::SendCheckBW()
   packet.AllocPacket(256); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "_checkbw");
-  enc += EncodeNumber(enc, 5);
+  enc += EncodeNumber(enc, 0);
   *enc = 0x05; // NULL
   enc++;
 
   packet.m_nBodySize = enc - packet.m_body;
 
+  // triggers _onbwcheck and eventually results in _onbwdone 
   return SendRTMP(packet);
 }
 
-bool CRTMP::SendCheckBWResult(int txn)
+bool CRTMP::SendCheckBWResult(double txn)
 {
   RTMPPacket packet;
   bool res;
@@ -1063,7 +1070,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 
   obj.Dump();
   std::string method = obj.GetProperty(0).GetString();
-  int txn = obj.GetProperty(1).GetNumber();
+  double txn = obj.GetProperty(1).GetNumber();
   Log(LOGDEBUG, "%s, server invoking <%s>", __FUNCTION__, method.c_str());
 
 #define CSCMP(a,b)	(a.size() == (sizeof(b)-1)) && !strcmp(a.c_str(),b)
@@ -1124,6 +1131,15 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   else if (CSCMP(method,"_onbwcheck"))
   {
     SendCheckBWResult(txn);
+  }
+  else if (CSCMP(method,"_onbwdone"))
+  {
+    std::vector<std::string>::iterator i; //remote method calls queue
+    for (i=m_methodCalls.begin(); i<m_methodCalls.end(); i++)
+      if (i[0] == "_checkbw") {
+        m_methodCalls.erase(i);
+        break;
+      }
   }
   else if (CSCMP(method,"_error"))
   {

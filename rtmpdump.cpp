@@ -40,8 +40,6 @@
 #define	SET_BINMODE(f)
 #endif
 
-#define _DEBUG	1
-
 #include "rtmp.h"
 #include "log.h"
 #include "AMFObject.h"

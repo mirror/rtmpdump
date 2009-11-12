@@ -1345,22 +1345,8 @@ int main(int argc, char **argv)
 			nInitialFrameSize = 0;
 			uint32_t lastOff;
 
-			Log(LOGINFO, "Connection timed out, trying to reconnect.\n\n");
-			rtmp->GetPauseStamps(&lastOff, &dSeek);
-
-			// Calculate the length of the stream to still play
-			if (dStopOffset > 0) {
-				dLength = dStopOffset - lastOff;
-
-				// Quit if start seek is past required stop offset
-				if(dLength <= 0) {
-					LogPrintf("Already Completed\n");
-					nStatus = RD_SUCCESS;
-					break;
-				}
-			}
-
-			if (!rtmp->ReconnectStream(bufferTime, lastOff, dLength)) {
+			Log(LOGINFO, "Connection timed out, trying to resume.\n\n");
+			if (!rtmp->ToggleStream()) {
 				Log(LOGERROR, "Failed to resume the stream\n\n");
 				if (!rtmp->IsTimedout())
 				  nStatus = RD_FAILED;

@@ -122,12 +122,6 @@ double CRTMP::GetDuration() { return m_fDuration; }
 bool CRTMP::IsConnected() { return m_socket != 0; }
 bool CRTMP::IsTimedout() { return m_bTimedout; }
 
-void CRTMP::GetPauseStamps(uint32_t *pause, uint32_t *resume)
-{
-  *pause = m_pauseStamp;
-  *resume = m_mediaStamp;
-}
-
 void CRTMP::SetBufferMS(int size)
 {
   m_nBufferMS = size;
@@ -403,6 +397,20 @@ bool CRTMP::ReconnectStream(int bufferTime, double seekTime, uint32_t dLength) {
   return ConnectStream(seekTime, dLength);
 }
 
+bool CRTMP::ToggleStream()
+{
+  bool res;
+
+  res = SendPause(true, m_pauseStamp);
+  if (!res) return res;
+
+  m_bPausing = 1;
+  sleep(1);
+  res = SendPause(false, m_pauseStamp);
+  m_bPausing = 3;
+  return res;
+}
+
 void CRTMP::DeleteStream() {
   if (m_stream_id < 0)
     return;
@@ -446,10 +454,8 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
         
   if (bHasMediaPacket)
     m_bPlaying = true;
-  else if (m_bTimedout) {
+  else if (m_bTimedout)
     m_pauseStamp = m_channelTimestamp[m_mediaChannel];
-    m_bPausing = 3;
-  }
 
   return bHasMediaPacket;
 }

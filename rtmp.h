@@ -213,16 +213,17 @@ class CRTMP
       int  m_nBWCheckCounter;
       int  m_nBytesIn;
       int  m_nBytesInSent;
-      bool m_bPlaying;
       int  m_nBufferMS;
       int  m_stream_id; // returned in _result from invoking createStream
       int  m_mediaChannel;
+      uint32_t  m_mediaStamp;
       uint32_t  m_pauseStamp;
-      bool m_bTimedout;
       int m_bPausing;
+      int m_nServerBW;
       int m_nClientBW;
       uint8_t m_nClientBW2;
-      int m_nServerBW;
+      bool m_bPlaying;
+      bool m_bTimedout;
 
       //std::string m_strPlayer;
       //std::string m_strPageUrl;

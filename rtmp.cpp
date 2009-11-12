@@ -426,10 +426,12 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 
     if (!bHasMediaPacket) { 
       packet.FreePacket();
-    }
-    if (m_bPausing == 3) {
-      if (packet.m_nTimeStamp <= m_pauseStamp) {
-	bHasMediaPacket = false;
+    } else if (m_bPausing == 3) {
+      if (packet.m_nTimeStamp <= m_mediaStamp) {
+	bHasMediaPacket = 0;
+#ifdef _DEBUG
+	Log(LOGDEBUG, "Skipped type: %02X, size: %d, TS: %d ms, abs TS: %d, pause: %d ms", packet.m_packetType, packet.m_nBodySize, packet.m_nTimeStamp, packet.m_hasAbsTimestamp, m_mediaStamp);
+#endif
 	continue;
       }
       m_bPausing = 0;
@@ -438,11 +440,6 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
         
   if (bHasMediaPacket)
     m_bPlaying = true;
-/*
-  else if (m_bTimedout) {
-    m_pauseStamp = m_channelTimestamp[m_mediaChannel];
-    m_bPausing = 3;
-  } */
 
   return bHasMediaPacket;
 }
@@ -483,6 +480,8 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
         bHasMediaPacket = 1;
 	if (!m_mediaChannel)
 	  m_mediaChannel = packet.m_nChannel;
+	if (!m_bPausing)
+	  m_mediaStamp = packet.m_nTimeStamp;
         break;
 
       case 0x09:
@@ -492,6 +491,8 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
         bHasMediaPacket = 1;
 	if (!m_mediaChannel)
 	  m_mediaChannel = packet.m_nChannel;
+	if (!m_bPausing)
+	  m_mediaStamp = packet.m_nTimeStamp;
         break;
 
       case 0x0F: // flex stream send
@@ -545,6 +546,7 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
       {
 	// go through FLV packets and handle metadata packets
         unsigned int pos=0;
+	uint32_t nTimeStamp = packet.m_nTimeStamp;
 
         while(pos+11 < packet.m_nBodySize) {
 		uint32_t dataSize = CRTMP::ReadInt24(packet.m_body+pos+1); // size without header (11) and prevTagSize (4)
@@ -555,10 +557,15 @@ int CRTMP::HandlePacket(RTMPPacket &packet) {
                 }
 		if(packet.m_body[pos] == 0x12) {
 			HandleMetadata(packet.m_body+pos+11, dataSize);
+		} else if (packet.m_body[pos] == 8 || packet.m_body[pos] == 9) {
+			nTimeStamp = CRTMP::ReadInt24(packet.m_body+pos+4);
+			nTimeStamp |= (packet.m_body[pos+7]<<24);
 		}
                 pos += (11+dataSize+4);
 	}
-	
+	if (!m_bPausing)
+	  m_mediaStamp = nTimeStamp;
+
         // FLV tag(s)
         //Log(LOGDEBUG, "%s, received: FLV tag(s) %lu bytes", __FUNCTION__, packet.m_nBodySize);
         bHasMediaPacket = 1;

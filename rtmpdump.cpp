@@ -1343,7 +1343,6 @@ int main(int argc, char **argv)
 			}
 		} else {
 			nInitialFrameSize = 0;
-			uint32_t lastOff;
 
 			Log(LOGINFO, "Connection timed out, trying to resume.\n\n");
 			if (!rtmp->ToggleStream()) {

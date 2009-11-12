@@ -40,6 +40,7 @@
 #define	SET_BINMODE(f)
 #endif
 
+#define _DEBUG	1
 
 #include "rtmp.h"
 #include "log.h"
@@ -750,7 +751,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 		// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
 		if( duration > 0 ) {
 			if  ((double)timestamp >= (double)duration*999.0 ) {
-				LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)timestamp/1000.0);
+				LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)duration/1000.0);
 				return RD_SUCCESS;
 			} else {
 				*percent = ((double)timestamp) / (duration*1000.0)*100.0;
@@ -788,7 +789,7 @@ int Download(CRTMP *rtmp,                      // connected CRTMP object
 	lastUpdate = now-1000;
 	do
 	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume && nInitialFrameSize > 0, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
 		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {
@@ -1254,7 +1255,6 @@ int main(int argc, char **argv)
 		dSeek, 0, bLiveStream, timeout);
 
 	off_t size = 0;
-        uint32_t timestamp = 0;
 
 	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
 	if(bResume) {
@@ -1316,11 +1316,6 @@ int main(int argc, char **argv)
 
 			Log(LOGINFO, "Connected...");
 
-			timestamp  = dSeek;
-			if(dSeek != 0) {
-				Log(LOGDEBUG, "Continuing at TS: %d ms\n", timestamp);
-			}
-
 			// User defined seek offset
 			if (dStartOffset > 0) {
 				// Don't need the start offset if resuming an existing file
@@ -1328,8 +1323,7 @@ int main(int argc, char **argv)
 					Log(LOGWARNING, "Can't seek a resumed stream, ignoring --start option");
 					dStartOffset = 0;
 				} else {
-					// ??? we want to add not equals ???
-					dSeek += dStartOffset;
+					dSeek = dStartOffset;
 				}
 			}
 
@@ -1351,21 +1345,14 @@ int main(int argc, char **argv)
 			}
 		} else {
 			nInitialFrameSize = 0;
+			uint32_t lastOff;
 
 			Log(LOGINFO, "Connection timed out, trying to reconnect.\n\n");
-        
-			nStatus = GetLastKeyframe(file, nSkipKeyFrames,
-						  &dSeek, &initialFrame,
-						  &initialFrameType,
-						  &nInitialFrameSize);
-			if (nStatus != RD_SUCCESS) {
-				Log(LOGDEBUG, "Failed to get last keyframe.");
-				break;
-			}
+			rtmp->GetPauseStamps(&lastOff, &dSeek);
 
 			// Calculate the length of the stream to still play
 			if (dStopOffset > 0) {
-				dLength = dStopOffset - dSeek;
+				dLength = dStopOffset - lastOff;
 
 				// Quit if start seek is past required stop offset
 				if(dLength <= 0) {
@@ -1375,7 +1362,7 @@ int main(int argc, char **argv)
 				}
 			}
 
-			if (!rtmp->ReconnectStream(bufferTime, dSeek, dLength)) {
+			if (!rtmp->ReconnectStream(bufferTime, lastOff, dLength)) {
 				Log(LOGERROR, "Failed to resume the stream\n\n");
 				if (!rtmp->IsTimedout())
 				  nStatus = RD_FAILED;
@@ -1394,10 +1381,9 @@ int main(int argc, char **argv)
 		free(initialFrame);
 		initialFrame = NULL;
 
-		/* If we succeeded, we're done. If writing to stdout
-		 * we can't seek and retry.
+		/* If we succeeded, we're done.
 		 */
-		if (nStatus != RD_INCOMPLETE || bStdoutMode || !rtmp->IsTimedout())
+		if (nStatus != RD_INCOMPLETE || !rtmp->IsTimedout())
 			break;
 	}
 

@@ -141,6 +141,7 @@ class CRTMP
       bool IsConnected(); 
       bool IsTimedout(); 
       double GetDuration();
+      void GetPauseStamps(uint32_t *pause, uint32_t *resume);
 
       bool ConnectStream(double seekTime=-10.0, uint32_t dLength=0);
       bool ReconnectStream(int bufferTime, double seekTime=-10.0, uint32_t dLength=0);

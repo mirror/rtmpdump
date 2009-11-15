@@ -766,8 +766,8 @@ bool CRTMP::SendConnectPacket()
   // add auth string
   if(Link.auth)
   {
-//  	*enc = 0x01; enc++;
-//  	*enc = 0x01; enc++;
+  	*enc = 0x01; enc++;
+  	*enc = 0x01; enc++;
 
   	enc += EncodeString(enc, Link.auth);
   }

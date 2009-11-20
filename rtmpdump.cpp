@@ -1366,7 +1366,7 @@ int main(int argc, char **argv)
 
 		/* If we succeeded, we're done.
 		 */
-		if (nStatus != RD_INCOMPLETE || !rtmp->IsTimedout())
+		if (nStatus != RD_INCOMPLETE || !rtmp->IsTimedout() || bLiveStream)
 			break;
 	}
 

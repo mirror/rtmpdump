@@ -158,6 +158,12 @@ int WriteStream(
 		char *packetBody	= packet.m_body;
 		unsigned int nPacketLen	= packet.m_nBodySize;
 
+                // Return -3 if this was completed nicely with invoke message Play.Stop or Play.Complete
+                if (rtnGetNextMediaPacket == 2) {
+                        Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
+                        return -3;
+                }
+
 		// skip video info/command packets
 		if(packet.m_packetType == 0x09 && 
 		   nPacketLen == 2 &&
@@ -432,11 +438,6 @@ stopKeyframeSearch:
 		if(tsm)
  			*tsm = bLiveStream ? packet.m_nTimeStamp : nTimeStamp;
 
-                // Return -3 if this was completed nicely with invoke message Play.Stop or Play.Complete
-                if (rtnGetNextMediaPacket == 2) {
-                        Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
-                        return -3;
-                }
 
 		return size;
 	}

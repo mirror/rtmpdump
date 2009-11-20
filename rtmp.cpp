@@ -1151,6 +1151,11 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   {
     // SendOnFCSubscribe();
   }
+  else if (CSCMP(method,"onFCUnsubscribe"))
+  {
+    Close();
+    return 1;
+  }
   else if (CSCMP(method,"_onbwcheck"))
   {
     SendCheckBWResult(txn);

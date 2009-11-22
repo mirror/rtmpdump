@@ -661,7 +661,7 @@ void processTCPrequest
 		// write FLV header first
 		nRead = WriteHeader(&buffer, PACKET_SIZE);
 		if(nRead > 0) {
-			nWritten = send(sockfd, buffer, nRead, MSG_NOSIGNAL);
+			nWritten = send(sockfd, buffer, nRead, 0);
                         if(nWritten < 0) {
                         	Log(LOGERROR, "%s, sending failed, error: %d", __FUNCTION__, GetSockError());
                                 goto cleanup; // we are in STREAMING_IN_PROGRESS, so we'll go to STREAMING_ACCEPTING    
@@ -680,7 +680,7 @@ void processTCPrequest
 
 			if(nRead > 0)
 			{
-				nWritten = send(sockfd, buffer, nRead, MSG_NOSIGNAL);
+				nWritten = send(sockfd, buffer, nRead, 0);
 				//Log(LOGDEBUG, "written: %d", nWritten);
 				if(nWritten < 0) {
 					Log(LOGERROR, "%s, sending failed, error: %d", __FUNCTION__, GetSockError());
@@ -1025,6 +1025,7 @@ int main(int argc, char **argv)
 	};
 
 	signal(SIGINT, sigIntHandler);
+	signal(SIGPIPE, SIG_IGN);
 
 	while((opt = getopt_long(argc, argv, "hvqVzr:s:t:p:a:f:u:n:c:l:y:m:d:D:A:B:g:w:x:", longopts, NULL)) != -1) {
 		switch(opt) {

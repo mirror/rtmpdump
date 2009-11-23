@@ -51,7 +51,7 @@
 #define RTMP_PROTOCOL_RTMP      0
 #define RTMP_PROTOCOL_RTMPT     1 // not yet supported
 #define RTMP_PROTOCOL_RTMPS     2 // not yet supported
-#define RTMP_PROTOCOL_RTMPE     3 // not yet supported
+#define RTMP_PROTOCOL_RTMPE     3
 #define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
 #define RTMP_PROTOCOL_RTMFP     5 // not yet supported
 

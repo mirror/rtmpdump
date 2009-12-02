@@ -3,6 +3,13 @@ Copyright 2008-2009 Andrej Stepanchuk; Distributed under the GPL v2
 Copyright 2009 Howard Chu
 Copyright 2009 The Flvstreamer Team
 
+2 December 2009, v1.9a
+- fix auth string typo
+- handle FCUnsubscribe message
+- don't try retry on live streams
+- SIGPIPE portability fix
+- remove "not supported" comment for RTMPE
+
 13 November 2009, v1.9
 - Handle more signals to reduce risk of unresumable/corrupted partially streamed files
 - Fixed >2GB file handling

@@ -55,6 +55,8 @@
 #define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
 #define RTMP_PROTOCOL_RTMFP     5 // not yet supported
 
+#define RTMP_DEFAULT_CHUNKSIZE	128
+
 extern char RTMPProtocolStringsLower[][7];
 
 int32_t GetTime();

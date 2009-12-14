@@ -1829,12 +1829,14 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
 
   nSize = packet.m_nBodySize;
   char *buffer = packet.m_body;
-  int nChunkSize = nSize > RTMP_DEFAULT_CHUNKSIZE ?
-	RTMP_DEFAULT_CHUNKSIZE : nSize;
+  int nChunkSize = RTMP_DEFAULT_CHUNKSIZE;
 
   while (nSize)
   {
     int wrote;
+
+    if (nSize < nChunkSize)
+      nChunkSize = nSize;
 
     if (header) {
       wrote=WriteN(header, nChunkSize+hSize);

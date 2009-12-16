@@ -257,10 +257,12 @@ bool CRTMP::HandShake(bool FP9HandShake)
 {
 	bool encrypted = Link.protocol == RTMP_PROTOCOL_RTMPE || Link.protocol == RTMP_PROTOCOL_RTMPTE;
 
-	if ( encrypted || Link.SWFHash )
-		FP9HandShake = true;
-	else
-		FP9HandShake = false;
+	FP9HandShake = true;//false;
+
+	if(encrypted && !FP9HandShake) {
+		Log(LOGERROR, "%s: RTMPE requires FP9 handshake!", __FUNCTION__);
+		return false;
+	}
 
 	char clientsig[RTMP_SIG_SIZE+1];
 	char serversig[RTMP_SIG_SIZE];
@@ -396,16 +398,11 @@ bool CRTMP::HandShake(bool FP9HandShake)
 	LogHex(LOGDEBUG, serversig, RTMP_SIG_SIZE);
 	#endif
 
-	if (!FP9HandShake) {
-		if(!WriteN(serversig, RTMP_SIG_SIZE))
-			return false;
-	}
-
 	// we have to use this signature now to find the correct algorithms for getting the digest and DH positions
 	int digestPosServer = GetDigestOffset2(serversig, RTMP_SIG_SIZE);
 	int dhposServer     = GetDHOffset2(serversig, RTMP_SIG_SIZE);
 
-	if(FP9HandShake && !VerifyDigest(digestPosServer, serversig, GenuineFMSKey, 36)) {
+	if(!VerifyDigest(digestPosServer, serversig, GenuineFMSKey, 36)) {
         	Log(LOGWARNING, "Trying different position for server digest!\n");
                 digestPosServer = GetDigestOffset1(serversig, RTMP_SIG_SIZE);
 		dhposServer     = GetDHOffset1(serversig, RTMP_SIG_SIZE);
@@ -496,6 +493,8 @@ bool CRTMP::HandShake(bool FP9HandShake)
 			Log(LOGWARNING, "%s: client signature does not match!", __FUNCTION__);
 		}
 
+		if(!WriteN(serversig, RTMP_SIG_SIZE))
+			return false;
 	} else {
 		// verify server response
 		int digestPosClient = GetDigestOffset1(clientsig+1, RTMP_SIG_SIZE);

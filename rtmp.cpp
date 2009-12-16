@@ -754,7 +754,7 @@ bool CRTMP::SendConnectPacket()
   if(Link.pageUrl)
   	enc += EncodeString(enc, "pageUrl", Link.pageUrl);
 
-  enc += EncodeNumber(enc, "objectEncoding", 0.0); // AMF0, AMF3 not supported yet
+  //enc += EncodeNumber(enc, "objectEncoding", 3.0); // use AMF3 objects, not supported yet
   enc += 2; // end of object - 0x00 0x00 0x09
   *enc = 0x09;
   enc++;

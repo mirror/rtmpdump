@@ -45,9 +45,6 @@ streams: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o streams.o parseurl.o dh.o
 rtmpdump: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o rtmpdump.o parseurl.o dh.o handshake.o
 	$(CXX) $(LDFLAGS) $^ -o $@$(EXT) $(LIBS)
 
-rtmpd2: bytes.o log.o rtmp2.o dh.o amf.o rtmpd2.o parseurl.o
-	$(CC) $(LDFLAGS) $^ -o $@$(EXT) $(LIBS)
-
 bytes.o: bytes.c bytes.h Makefile
 log.o: log.c log.h Makefile
 rtmp.o: rtmp.cpp rtmp.h log.h AMFObject.h Makefile
@@ -59,6 +56,3 @@ streams.o: streams.cpp rtmp.h log.h Makefile
 dh.o: dh.c dh.h log.h Makefile
 handshake.o: handshake.cpp rtmp.h log.h Makefile
 
-rtmp2.o: rtmp2.c rtmp2.h hand2.c log.h amf.h Makefile
-amf.o: amf.c amf.h Makefile
-rtmpd2.o: rtmpd2.c rtmp2.h log.h amf.h Makefile

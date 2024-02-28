@@ -58,10 +58,18 @@
 #include <openssl/sha.h>
 #include <openssl/hmac.h>
 #include <openssl/rc4.h>
+#if OPENSSL_VERSION_NUMBER >= 0x10100000
+#define HMAC_CTX HMAC_CTX *
+#define HMAC_setup(ctx, key, len)	ctx = HMAC_CTX_new(); HMAC_Init_ex(ctx, key, len, EVP_sha256(), 0)
+#define HMAC_crunch(ctx, buf, len)	HMAC_Update(ctx, buf, len)
+#define HMAC_finish(ctx, dig, dlen)	HMAC_Final(ctx, dig, &dlen)
+#define HMAC_close(ctx) HMAC_CTX_free(ctx)
+#else
 #define HMAC_setup(ctx, key, len)	HMAC_CTX_init(&ctx); HMAC_Init_ex(&ctx, (unsigned char *)key, len, EVP_sha256(), 0)
 #define HMAC_crunch(ctx, buf, len)	HMAC_Update(&ctx, (unsigned char *)buf, len)
 #define HMAC_finish(ctx, dig, dlen)	HMAC_Final(&ctx, (unsigned char *)dig, &dlen);
 #define HMAC_close(ctx)	HMAC_CTX_cleanup(&ctx)
+#endif
 #endif
 
 extern void RTMP_TLS_Init();

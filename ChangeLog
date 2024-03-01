@@ -4,6 +4,16 @@ Copyright 2009-2015 Howard Chu
 Copyright 2009 The Flvstreamer Team
 http://rtmpdump.mplayerhq.hu/
 
+1 March 2024, v2.6
+- miscellaneous cleanup of authentication and encryption support
+
+23 December 2015
+- miscellaneous protocol fixes
+- withdraw v2.5 RTMPE type 10 support, code was too broken/non-portable
+
+31 March 2012, v2.5
+- add RTMPE type 10 handshake support for x86 systems
+
 20 July 2011
 - add NetStream.Authenticate.UsherToken for Justin.tv
 

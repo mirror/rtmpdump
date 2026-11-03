@@ -730,6 +730,8 @@ AMFProp_Decode(AMFObjectProperty *prop, const char *pBuffer, int nSize,
       }
     case AMF_STRICT_ARRAY:
       {
+	if (nSize < 4)
+	  return -1;
 	unsigned int nArrayLen = AMF_DecodeInt32(pBuffer);
 	nSize -= 4;
 
@@ -1143,8 +1145,11 @@ invalid:
 	        goto invalid;
 	      nRes = AMF3Prop_Decode(&prop, pBuffer, nSize, FALSE);
 	      if (nRes == -1)
-		RTMP_Log(RTMP_LOGDEBUG, "%s, failed to decode AMF3 property!",
-		    __FUNCTION__);
+		{
+		  RTMP_Log(RTMP_LOGDEBUG, "%s, failed to decode AMF3 property!",
+		      __FUNCTION__);
+		  break;
+		}
 
 	      AMFProp_SetName(&prop, AMF3CD_GetProp(&cd, i));
 	      AMF_AddProp(obj, &prop);
@@ -1161,6 +1166,8 @@ invalid:
 		  if (nSize <=0)
 		    goto invalid;
 		  nRes = AMF3Prop_Decode(&prop, pBuffer, nSize, TRUE);
+		  if (nRes == -1)
+		    break;
 		  AMF_AddProp(obj, &prop);
 
 		  pBuffer += nRes;
